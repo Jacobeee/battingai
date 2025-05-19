@@ -12,8 +12,8 @@ def lambda_handler(event, context):
     """Handle video upload from client"""
     # Define CORS headers
     headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key',
+        'Access-Control-Allow-Origin': 'https://jacobeee.github.io',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With,Accept',
         'Access-Control-Allow-Methods': 'GET,POST,OPTIONS'
     }
     
