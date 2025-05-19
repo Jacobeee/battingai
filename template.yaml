@@ -90,8 +90,9 @@ Resources:
       StageName: Prod
       Cors:
         AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
-        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Api-Key,Accept,Origin'"
+        AllowOrigin: "'https://jacobeee.github.io'"
+        AllowCredentials: true
 
   # Lambda function for API endpoint to upload user video
   UploadVideoFunction:
