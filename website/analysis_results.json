@@ -1,0 +1,183 @@
+{
+  "timestamp": "2025-05-16T13:03:59.701095",
+  "comparison_results": [
+    {
+      "frame_index": 0,
+      "similarity_score": 0.7562094662159313,
+      "edge_ratio": 1.9841091792858478,
+      "issues": [
+        {
+          "type": "stance_wide",
+          "description": "Your stance is too wide compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 1,
+      "similarity_score": 0.7641977844358168,
+      "edge_ratio": 2.403237528906508,
+      "issues": [
+        {
+          "type": "stance_wide",
+          "description": "Your stance is too wide compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 2,
+      "similarity_score": 0.7733354633526187,
+      "edge_ratio": 1.768841166936791,
+      "issues": [
+        {
+          "type": "stance_wide",
+          "description": "Your stance is too wide compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 3,
+      "similarity_score": 0.7661164230666788,
+      "edge_ratio": 2.0107330761136444,
+      "issues": [
+        {
+          "type": "hip_rotation",
+          "description": "Your hip rotation is delayed compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 4,
+      "similarity_score": 0.7468206582155246,
+      "edge_ratio": 1.6750350631136044,
+      "issues": [
+        {
+          "type": "hip_rotation",
+          "description": "Your hip rotation is delayed compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 5,
+      "similarity_score": 0.7746945392012767,
+      "edge_ratio": 1.6348738118649624,
+      "issues": [
+        {
+          "type": "hip_rotation",
+          "description": "Your hip rotation is delayed compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 6,
+      "similarity_score": 0.7748098648977643,
+      "edge_ratio": 1.7059097564222014,
+      "issues": [
+        {
+          "type": "follow_through",
+          "description": "Your follow-through is incomplete compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 7,
+      "similarity_score": 0.7710716947016292,
+      "edge_ratio": 1.7184205482077823,
+      "issues": [
+        {
+          "type": "follow_through",
+          "description": "Your follow-through is incomplete compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 8,
+      "similarity_score": 0.7287475476489161,
+      "edge_ratio": 1.5495162708883026,
+      "issues": [
+        {
+          "type": "follow_through",
+          "description": "Your follow-through is incomplete compared to the reference"
+        }
+      ]
+    },
+    {
+      "frame_index": 9,
+      "similarity_score": 0.7479331466415946,
+      "edge_ratio": 1.4882837925797352,
+      "issues": [
+        {
+          "type": "follow_through",
+          "description": "Your follow-through is incomplete compared to the reference"
+        }
+      ]
+    }
+  ],
+  "feedback": {
+    "issues": [
+      {
+        "type": "stance_wide",
+        "description": "Your stance is too wide compared to the reference",
+        "causes": [
+          "Feet positioned too far apart",
+          "Overcompensating for balance issues",
+          "Incorrect attempt to generate power"
+        ],
+        "corrections": [
+          "Narrow your stance to approximately shoulder width",
+          "Focus on a balanced athletic position",
+          "Practice proper stance width with a batting tee"
+        ],
+        "resources": [
+          {
+            "type": "youtube",
+            "title": "Perfect Baseball Stance_Wide Tutorial",
+            "url": "https://www.youtube.com/watch?v=example1"
+          }
+        ]
+      },
+      {
+        "type": "hip_rotation",
+        "description": "Your hip rotation is delayed compared to the reference",
+        "causes": [
+          "Upper body moving before the hips",
+          "Insufficient hip rotation",
+          "Poor sequencing of body movements"
+        ],
+        "corrections": [
+          "Initiate swing with lower body",
+          "Focus on rotating hips toward pitcher",
+          "Practice hip rotation drills"
+        ],
+        "resources": [
+          {
+            "type": "youtube",
+            "title": "Perfect Baseball Hip_Rotation Tutorial",
+            "url": "https://www.youtube.com/watch?v=example2"
+          }
+        ]
+      },
+      {
+        "type": "follow_through",
+        "description": "Your follow-through is incomplete compared to the reference",
+        "causes": [
+          "Stopping swing too early",
+          "Not extending arms fully",
+          "Poor weight transfer through swing"
+        ],
+        "corrections": [
+          "Complete full swing motion",
+          "Extend arms through contact",
+          "Transfer weight to front foot during follow-through"
+        ],
+        "resources": [
+          {
+            "type": "youtube",
+            "title": "Perfect Baseball Follow_Through Tutorial",
+            "url": "https://www.youtube.com/watch?v=example3"
+          }
+        ]
+      }
+    ],
+    "summary": "Analysis identified 3 key areas for improvement: stance_wide, hip_rotation, follow_through. Review the detailed feedback and watch the recommended videos to improve your technique."
+  }
+}

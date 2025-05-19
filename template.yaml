@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  BattingAI - MLB batting mechanics analysis application
+  
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 1024
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+
+Resources:
+  # S3 Bucket for storing videos and analysis results
+  VideoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+
+  # Lambda function for video processing
+  ProcessVideoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/process_video/
+      Handler: app.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref VideoBucket
+        - S3WritePolicy:
+            BucketName: !Ref VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref VideoBucket
+      Layers:
+        - !Ref ProcessingLayer
+
+  # Lambda function for comparing user video with reference videos
+  CompareVideosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/compare_videos/
+      Handler: app.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref VideoBucket
+        - S3WritePolicy:
+            BucketName: !Ref VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref VideoBucket
+      Layers:
+        - !Ref ProcessingLayer
+
+  # Lambda function for generating feedback
+  GenerateFeedbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/generate_feedback/
+      Handler: app.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref VideoBucket
+        - S3WritePolicy:
+            BucketName: !Ref VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref VideoBucket
+
+  # Lambda Layer for common processing libraries
+  ProcessingLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: batting-ai-processing-layer
+      Description: Layer with OpenCV and other video processing libraries
+      ContentUri: layers/processing/
+      CompatibleRuntimes:
+        - python3.11
+      RetentionPolicy: Retain
+
+  # API Gateway for the application
+  BattingAIApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowOrigin: "'*'"
+
+  # Lambda function for API endpoint to upload user video
+  UploadVideoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/upload_video/
+      Handler: app.lambda_handler
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref VideoBucket
+      Events:
+        UploadVideo:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BattingAIApi
+            Path: /upload
+            Method: post
+
+  # Lambda function for API endpoint to start analysis
+  StartAnalysisFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/start_analysis/
+      Handler: app.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref VideoBucket
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ProcessVideoFunction
+      Environment:
+        Variables:
+          PROCESS_VIDEO_FUNCTION: !GetAtt ProcessVideoFunction.Arn
+          COMPARE_VIDEOS_FUNCTION: !GetAtt CompareVideosFunction.Arn
+          GENERATE_FEEDBACK_FUNCTION: !GetAtt GenerateFeedbackFunction.Arn
+      Events:
+        StartAnalysis:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BattingAIApi
+            Path: /analyze
+            Method: post
+
+  # Lambda function for API endpoint to get analysis results
+  GetResultsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get_results/
+      Handler: app.lambda_handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref VideoBucket
+      Events:
+        GetResults:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BattingAIApi
+            Path: /results/{analysisId}
+            Method: get
+
+Outputs:
+  BattingAIApi:
+    Description: "API Gateway endpoint URL for Prod stage for BattingAI application"
+    Value: !Sub "https://${BattingAIApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  VideoBucket:
+    Description: "S3 bucket for storing videos and analysis results"
+    Value: !Ref VideoBucket

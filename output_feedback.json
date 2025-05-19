@@ -1,0 +1,1 @@
+{"statusCode": 500, "headers": {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}, "body": "{\"error\": \"An error occurred (NoSuchKey) when calling the GetObject operation: The specified key does not exist.\"}"}

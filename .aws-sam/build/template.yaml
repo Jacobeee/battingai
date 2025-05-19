@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'BattingAI - MLB batting mechanics analysis application
+
+  '
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 1024
+    Runtime: python3.11
+    Architectures:
+    - x86_64
+Resources:
+  VideoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - '*'
+          AllowedMethods:
+          - GET
+          - PUT
+          - POST
+          - DELETE
+          - HEAD
+          AllowedOrigins:
+          - '*'
+          MaxAge: 3000
+  ProcessVideoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ProcessVideoFunction
+      Handler: app.lambda_handler
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: VideoBucket
+      - S3WritePolicy:
+          BucketName:
+            Ref: VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: VideoBucket
+      Layers:
+      - Ref: ProcessingLayer
+    Metadata:
+      SamResourceId: ProcessVideoFunction
+  CompareVideosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CompareVideosFunction
+      Handler: app.lambda_handler
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: VideoBucket
+      - S3WritePolicy:
+          BucketName:
+            Ref: VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: VideoBucket
+      Layers:
+      - Ref: ProcessingLayer
+    Metadata:
+      SamResourceId: CompareVideosFunction
+  GenerateFeedbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GenerateFeedbackFunction
+      Handler: app.lambda_handler
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: VideoBucket
+      - S3WritePolicy:
+          BucketName:
+            Ref: VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: VideoBucket
+    Metadata:
+      SamResourceId: GenerateFeedbackFunction
+  ProcessingLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: batting-ai-processing-layer
+      Description: Layer with OpenCV and other video processing libraries
+      ContentUri: ..\..\layers\processing
+      CompatibleRuntimes:
+      - python3.11
+      RetentionPolicy: Retain
+  BattingAIApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: '''GET,POST,OPTIONS'''
+        AllowHeaders: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key'''
+        AllowOrigin: '''*'''
+  UploadVideoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: UploadVideoFunction
+      Handler: app.lambda_handler
+      Policies:
+      - S3WritePolicy:
+          BucketName:
+            Ref: VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: VideoBucket
+      Events:
+        UploadVideo:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: BattingAIApi
+            Path: /upload
+            Method: post
+    Metadata:
+      SamResourceId: UploadVideoFunction
+  StartAnalysisFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: StartAnalysisFunction
+      Handler: app.lambda_handler
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: VideoBucket
+      - LambdaInvokePolicy:
+          FunctionName:
+            Ref: ProcessVideoFunction
+      Environment:
+        Variables:
+          PROCESS_VIDEO_FUNCTION:
+            Fn::GetAtt:
+            - ProcessVideoFunction
+            - Arn
+          COMPARE_VIDEOS_FUNCTION:
+            Fn::GetAtt:
+            - CompareVideosFunction
+            - Arn
+          GENERATE_FEEDBACK_FUNCTION:
+            Fn::GetAtt:
+            - GenerateFeedbackFunction
+            - Arn
+      Events:
+        StartAnalysis:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: BattingAIApi
+            Path: /analyze
+            Method: post
+    Metadata:
+      SamResourceId: StartAnalysisFunction
+  GetResultsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetResultsFunction
+      Handler: app.lambda_handler
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: VideoBucket
+      Environment:
+        Variables:
+          BUCKET_NAME:
+            Ref: VideoBucket
+      Events:
+        GetResults:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: BattingAIApi
+            Path: /results/{analysisId}
+            Method: get
+    Metadata:
+      SamResourceId: GetResultsFunction
+Outputs:
+  BattingAIApi:
+    Description: API Gateway endpoint URL for Prod stage for BattingAI application
+    Value:
+      Fn::Sub: https://${BattingAIApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+  VideoBucket:
+    Description: S3 bucket for storing videos and analysis results
+    Value:
+      Ref: VideoBucket
