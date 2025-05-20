@@ -1,7 +1,6 @@
 import json
 import boto3
 import os
-import base64
 import uuid
 from datetime import datetime
 
@@ -9,7 +8,7 @@ s3_client = boto3.client('s3')
 bucket_name = os.environ['BUCKET_NAME']
 
 def lambda_handler(event, context):
-    """Handle video upload from client"""
+    """Generate presigned URL for direct S3 upload"""
     # Define CORS headers
     headers = {
         'Access-Control-Allow-Origin': 'https://jacobeee.github.io',
@@ -28,34 +27,20 @@ def lambda_handler(event, context):
         }
     
     try:
-        # Parse request body
-        body = json.loads(event['body'])
-        
-        # Get video data (base64 encoded)
-        video_data = body.get('video')
-        if not video_data:
-            return {
-                'statusCode': 400,
-                'headers': headers,
-                'body': json.dumps({
-                    'error': 'No video data provided'
-                })
-            }
-        
-        # Decode base64 video data
-        video_bytes = base64.b64decode(video_data)
-        
         # Generate unique ID for this analysis
         analysis_id = str(uuid.uuid4())
         timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
         video_key = f"uploads/{timestamp}_{analysis_id}.mp4"
         
-        # Upload video to S3
-        s3_client.put_object(
-            Bucket=bucket_name,
-            Key=video_key,
-            Body=video_bytes,
-            ContentType='video/mp4'
+        # Generate presigned URL for S3 upload
+        presigned_url = s3_client.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': bucket_name,
+                'Key': video_key,
+                'ContentType': 'video/mp4'
+            },
+            ExpiresIn=300  # URL valid for 5 minutes
         )
         
         # Create initial metadata
@@ -63,7 +48,7 @@ def lambda_handler(event, context):
             'analysis_id': analysis_id,
             'video_key': video_key,
             'timestamp': timestamp,
-            'status': 'uploaded'
+            'status': 'pending'  # Will be updated to 'uploaded' after successful upload
         }
         
         s3_client.put_object(
@@ -78,12 +63,13 @@ def lambda_handler(event, context):
             'headers': headers,
             'body': json.dumps({
                 'analysis_id': analysis_id,
-                'status': 'uploaded'
+                'upload_url': presigned_url,
+                'video_key': video_key
             })
         }
         
     except Exception as e:
-        print(f"Error uploading video: {str(e)}")
+        print(f"Error generating upload URL: {str(e)}")
         return {
             'statusCode': 500,
             'headers': headers,
