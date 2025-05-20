@@ -265,28 +265,37 @@ async function handleFormSubmit(event) {
 
 // Function to display analysis results
 function displayResults(results, playerId) {
+    console.log("Displaying results:", results);
+    
     // Hide progress indicators
     document.getElementById('uploadProgress').style.display = 'none';
     document.getElementById('loadingSpinner').style.display = 'none';
     
     // Show results container
-    const resultsContainer = document.getElementById('resultsContainer');
-    if (!resultsContainer) {
+    let container = document.getElementById('resultsContainer');
+    if (!container) {
         // Create results container if it doesn't exist
-        const container = document.createElement('div');
+        container = document.createElement('div');
         container.id = 'resultsContainer';
         container.className = 'mt-4 p-4 border rounded bg-light';
         document.querySelector('.container').appendChild(container);
     }
     
-    // Get or create results container
-    const container = document.getElementById('resultsContainer') || document.createElement('div');
     container.innerHTML = ''; // Clear previous results
     
     // Create header
     const header = document.createElement('h3');
     header.textContent = 'Swing Analysis Results';
     container.appendChild(header);
+    
+    // Check if results has the expected structure
+    if (!results.results) {
+        const errorMsg = document.createElement('p');
+        errorMsg.textContent = 'Results data is not in the expected format. Please try again.';
+        container.appendChild(errorMsg);
+        console.error('Invalid results format:', results);
+        return;
+    }
     
     // Add player info
     const playerInfo = document.createElement('p');
@@ -389,11 +398,6 @@ function displayResults(results, playerId) {
         table.innerHTML += '</tbody>';
         comparisonDiv.appendChild(table);
         container.appendChild(comparisonDiv);
-    }
-    
-    // Add the container to the page if it's not already there
-    if (!document.getElementById('resultsContainer')) {
-        document.querySelector('.container').appendChild(container);
     }
 }
 
