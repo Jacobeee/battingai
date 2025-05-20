@@ -99,10 +99,15 @@ Resources:
     Properties:
       StageName: Prod
       Cors:
-        AllowMethods: '''GET,POST,OPTIONS'''
-        AllowHeaders: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Api-Key,Accept,Origin'''
-        AllowOrigin: '''https://jacobeee.github.io'''
-        AllowCredentials: true
+        AllowMethods: GET,POST,OPTIONS
+        AllowHeaders: Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With,Accept
+        AllowOrigin: https://jacobeee.github.io
+      BinaryMediaTypes:
+      - application/json
+      - multipart/form-data
+      - image/jpeg
+      - image/png
+      - video/mp4
   UploadVideoFunction:
     Type: AWS::Serverless::Function
     Properties:
