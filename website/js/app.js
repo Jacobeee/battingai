@@ -263,6 +263,140 @@ async function handleFormSubmit(event) {
     }
 }
 
+// Function to display analysis results
+function displayResults(results, playerId) {
+    // Hide progress indicators
+    document.getElementById('uploadProgress').style.display = 'none';
+    document.getElementById('loadingSpinner').style.display = 'none';
+    
+    // Show results container
+    const resultsContainer = document.getElementById('resultsContainer');
+    if (!resultsContainer) {
+        // Create results container if it doesn't exist
+        const container = document.createElement('div');
+        container.id = 'resultsContainer';
+        container.className = 'mt-4 p-4 border rounded bg-light';
+        document.querySelector('.container').appendChild(container);
+    }
+    
+    // Get or create results container
+    const container = document.getElementById('resultsContainer') || document.createElement('div');
+    container.innerHTML = ''; // Clear previous results
+    
+    // Create header
+    const header = document.createElement('h3');
+    header.textContent = 'Swing Analysis Results';
+    container.appendChild(header);
+    
+    // Add player info
+    const playerInfo = document.createElement('p');
+    playerInfo.innerHTML = `<strong>Compared to:</strong> ${results.results.player_name || playerId}`;
+    container.appendChild(playerInfo);
+    
+    // Add overall score if available
+    if (results.results.overall_score) {
+        const scoreDiv = document.createElement('div');
+        scoreDiv.className = 'mb-3';
+        scoreDiv.innerHTML = `
+            <h4>Overall Score: ${results.results.overall_score}/100</h4>
+            <div class="progress">
+                <div class="progress-bar" role="progressbar" style="width: ${results.results.overall_score}%" 
+                     aria-valuenow="${results.results.overall_score}" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+        `;
+        container.appendChild(scoreDiv);
+    }
+    
+    // Add strengths if available
+    if (results.results.strengths && results.results.strengths.length > 0) {
+        const strengthsDiv = document.createElement('div');
+        strengthsDiv.className = 'mb-3';
+        strengthsDiv.innerHTML = '<h4>Strengths</h4><ul>';
+        
+        results.results.strengths.forEach(strength => {
+            strengthsDiv.innerHTML += `<li>${strength}</li>`;
+        });
+        
+        strengthsDiv.innerHTML += '</ul>';
+        container.appendChild(strengthsDiv);
+    }
+    
+    // Add areas to improve if available
+    if (results.results.areas_to_improve && results.results.areas_to_improve.length > 0) {
+        const improvementsDiv = document.createElement('div');
+        improvementsDiv.className = 'mb-3';
+        improvementsDiv.innerHTML = '<h4>Areas to Improve</h4><ul>';
+        
+        results.results.areas_to_improve.forEach(area => {
+            improvementsDiv.innerHTML += `<li>${area}</li>`;
+        });
+        
+        improvementsDiv.innerHTML += '</ul>';
+        container.appendChild(improvementsDiv);
+    }
+    
+    // Add detailed feedback if available
+    if (results.results.detailed_feedback) {
+        const feedbackDiv = document.createElement('div');
+        feedbackDiv.className = 'mb-3';
+        feedbackDiv.innerHTML = `
+            <h4>Detailed Feedback</h4>
+            <p>${results.results.detailed_feedback}</p>
+        `;
+        container.appendChild(feedbackDiv);
+    }
+    
+    // Add comparison results if available
+    if (results.results.comparison_results && results.results.comparison_results.length > 0) {
+        const comparisonDiv = document.createElement('div');
+        comparisonDiv.className = 'mb-3';
+        comparisonDiv.innerHTML = '<h4>Frame-by-Frame Analysis</h4>';
+        
+        const table = document.createElement('table');
+        table.className = 'table table-striped';
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th>Frame</th>
+                    <th>Similarity Score</th>
+                    <th>Issues</th>
+                </tr>
+            </thead>
+            <tbody>
+        `;
+        
+        results.results.comparison_results.forEach(frame => {
+            let issuesHtml = '';
+            if (frame.issues && frame.issues.length > 0) {
+                issuesHtml = '<ul>';
+                frame.issues.forEach(issue => {
+                    issuesHtml += `<li>${issue.description}</li>`;
+                });
+                issuesHtml += '</ul>';
+            } else {
+                issuesHtml = 'No issues detected';
+            }
+            
+            table.innerHTML += `
+                <tr>
+                    <td>${frame.frame_index + 1}</td>
+                    <td>${Math.round(frame.similarity_score * 100)}%</td>
+                    <td>${issuesHtml}</td>
+                </tr>
+            `;
+        });
+        
+        table.innerHTML += '</tbody>';
+        comparisonDiv.appendChild(table);
+        container.appendChild(comparisonDiv);
+    }
+    
+    // Add the container to the page if it's not already there
+    if (!document.getElementById('resultsContainer')) {
+        document.querySelector('.container').appendChild(container);
+    }
+}
+
 // Helper function to convert file to base64 (kept for compatibility)
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
