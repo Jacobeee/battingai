@@ -83,12 +83,6 @@ async function handleFormSubmit(event) {
         return;
     }
     
-    // Check file size
-    if (videoFile.size > 5 * 1024 * 1024) { // 5MB limit
-        alert('Video file is too large. Please select a smaller file (under 5MB).');
-        return;
-    }
-    
     // Show progress
     document.getElementById('uploadProgress').style.display = 'block';
     document.querySelector('.progress-bar').style.width = '0%';
@@ -96,59 +90,79 @@ async function handleFormSubmit(event) {
     try {
         // Show processing spinner
         document.getElementById('loadingSpinner').style.display = 'block';
-        document.getElementById('statusMessage').textContent = 'Uploading video...';
-        document.querySelector('.progress-bar').style.width = '30%';
+        document.getElementById('statusMessage').textContent = 'Getting upload URL...';
+        document.querySelector('.progress-bar').style.width = '10%';
         
-        // Convert video to base64
-        const base64Video = await fileToBase64(videoFile);
-        console.log('Video converted to base64, length:', base64Video.length);
-        
-        // Upload video to S3 via API
-        console.log('Sending upload request to:', API_ENDPOINTS.upload);
-        const uploadResponse = await fetch(API_ENDPOINTS.upload, {
+        // Step 1: Get presigned URL from the API
+        console.log('Requesting presigned URL from:', API_ENDPOINTS.upload);
+        const urlResponse = await fetch(API_ENDPOINTS.upload, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
             mode: 'cors',
-            body: JSON.stringify({
-                video: base64Video
-            })
+            body: JSON.stringify({})  // Empty body since we're just requesting a URL
         });
         
-        console.log('Upload response status:', uploadResponse.status);
+        console.log('URL response status:', urlResponse.status);
         
-        if (!uploadResponse.ok) {
+        if (!urlResponse.ok) {
             let errorText = '';
             try {
-                errorText = await uploadResponse.text();
+                errorText = await urlResponse.text();
             } catch (e) {
                 errorText = 'Could not read error response';
             }
-            console.error('Upload error response:', errorText);
-            throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+            console.error('URL request error response:', errorText);
+            throw new Error(`URL request failed: ${urlResponse.status} ${urlResponse.statusText}`);
         }
         
-        let uploadData;
+        let urlData;
         try {
-            uploadData = await uploadResponse.json();
-            console.log('Upload response data:', uploadData);
+            urlData = await urlResponse.json();
+            console.log('URL response data:', urlData);
         } catch (e) {
-            console.error('Error parsing upload response:', e);
+            console.error('Error parsing URL response:', e);
             throw new Error('Invalid response from upload endpoint');
         }
         
-        if (!uploadData || !uploadData.analysis_id) {
-            throw new Error('Missing analysis_id in upload response');
+        if (!urlData || !urlData.upload_url || !urlData.analysis_id) {
+            throw new Error('Missing upload_url or analysis_id in response');
         }
         
-        const analysisId = uploadData.analysis_id;
+        const { upload_url, analysis_id } = urlData;
+        
+        // Step 2: Upload the video directly to S3 using the presigned URL
+        document.getElementById('statusMessage').textContent = 'Uploading video to S3...';
+        document.querySelector('.progress-bar').style.width = '30%';
+        
+        console.log('Uploading video directly to S3 using presigned URL');
+        const s3UploadResponse = await fetch(upload_url, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'video/mp4'
+            },
+            body: videoFile  // Send the raw file, not base64
+        });
+        
+        console.log('S3 upload response status:', s3UploadResponse.status);
+        
+        if (!s3UploadResponse.ok) {
+            let errorText = '';
+            try {
+                errorText = await s3UploadResponse.text();
+            } catch (e) {
+                errorText = 'Could not read error response';
+            }
+            console.error('S3 upload error response:', errorText);
+            throw new Error(`S3 upload failed: ${s3UploadResponse.status} ${s3UploadResponse.statusText}`);
+        }
         
         document.querySelector('.progress-bar').style.width = '60%';
         document.getElementById('statusMessage').textContent = 'Analyzing your swing...';
         
-        // Start analysis
+        // Step 3: Start analysis
         const analyzeResponse = await fetch(API_ENDPOINTS.analyze, {
             method: 'POST',
             headers: {
@@ -157,7 +171,7 @@ async function handleFormSubmit(event) {
             },
             mode: 'cors',
             body: JSON.stringify({
-                analysis_id: analysisId,
+                analysis_id: analysis_id,
                 player_id: playerId
             })
         });
@@ -188,7 +202,7 @@ async function handleFormSubmit(event) {
             console.log(`Polling for results (attempt ${attempts}/${maxAttempts})...`);
             
             try {
-                const resultsResponse = await fetch(API_ENDPOINTS.results(analysisId), {
+                const resultsResponse = await fetch(API_ENDPOINTS.results(analysis_id), {
                     method: 'GET',
                     headers: {
                         'Accept': 'application/json'
@@ -249,9 +263,7 @@ async function handleFormSubmit(event) {
     }
 }
 
-
-
-// Helper function to convert file to base64
+// Helper function to convert file to base64 (kept for compatibility)
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -264,4 +276,3 @@ function fileToBase64(file) {
         reader.onerror = error => reject(error);
     });
 }
-
