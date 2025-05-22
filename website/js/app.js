@@ -372,14 +372,20 @@ function displayResults(results, playerId) {
         // Define swing phase names
         const phaseNames = ['Setup', 'Load', 'Swing', 'Contact', 'Follow-through'];
         
+        // Log the frame paths for debugging
+        console.log("All frame paths:", results.frame_paths);
+        
         results.results.comparison_results.forEach((frame, index) => {
             // Create a card for each frame
             const card = document.createElement('div');
             card.className = 'col';
             
-            // Get the frame image path
-            const framePath = results.frame_paths ? results.frame_paths[frame.frame_index] : null;
-            const imageUrl = framePath ? `https://${bucket_name}.s3.amazonaws.com/${framePath}` : '';
+            // Get the frame image path - use the index directly since frame_index might not match array index
+            const framePath = results.frame_paths && results.frame_paths.length > index ? results.frame_paths[index] : null;
+            // Log the frame path for debugging
+            console.log(`Frame ${index} path:`, framePath);
+            // Use the correct S3 URL format
+            const imageUrl = framePath ? `https://s3.amazonaws.com/${bucket_name}/${framePath}` : '';
             
             // Determine the phase name based on index
             const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
