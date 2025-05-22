@@ -372,20 +372,10 @@ function displayResults(results, playerId) {
         // Define swing phase names
         const phaseNames = ['Setup', 'Load', 'Swing', 'Contact', 'Follow-through'];
         
-        // Log the frame paths for debugging
-        console.log("All frame paths:", results.frame_paths);
-        
         results.results.comparison_results.forEach((frame, index) => {
             // Create a card for each frame
             const card = document.createElement('div');
             card.className = 'col';
-            
-            // Get the frame image path - use the index directly since frame_index might not match array index
-            const framePath = results.frame_paths && results.frame_paths.length > index ? results.frame_paths[index] : null;
-            // Log the frame path for debugging
-            console.log(`Frame ${index} path:`, framePath);
-            // Use the correct S3 URL format
-            const imageUrl = framePath ? `https://s3.amazonaws.com/${bucket_name}/${framePath}` : '';
             
             // Determine the phase name based on index
             const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
@@ -408,7 +398,12 @@ function displayResults(results, playerId) {
                     <div class="card-header bg-primary text-white">
                         ${phaseName} - Frame ${frame.frame_index + 1}
                     </div>
-                    ${imageUrl ? `<img src="${imageUrl}" class="card-img-top" alt="Frame ${frame.frame_index + 1}">` : ''}
+                    <div class="text-center p-3 bg-light">
+                        <div class="swing-phase-icon" style="height: 100px; display: flex; align-items: center; justify-content: center;">
+                            <i class="bi bi-camera-video" style="font-size: 2rem;"></i>
+                            <div class="mt-2">Frame ${frame.frame_index + 1}</div>
+                        </div>
+                    </div>
                     <div class="card-body">
                         <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
                         <div class="progress mb-3">
