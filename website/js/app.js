@@ -172,6 +172,7 @@ async function handleFormSubmit(event) {
             mode: 'cors',
             body: JSON.stringify({
                 analysis_id: analysis_id,
+                video_key: urlData.video_key,  // Include the video_key from the upload response
                 player_id: playerId
             })
         });
@@ -195,7 +196,7 @@ async function handleFormSubmit(event) {
         
         let results = null;
         let attempts = 0;
-        const maxAttempts = 20;
+        const maxAttempts = 40; // Increased from 20 to 40 to allow more time for processing
         
         while (!results && attempts < maxAttempts) {
             attempts++;

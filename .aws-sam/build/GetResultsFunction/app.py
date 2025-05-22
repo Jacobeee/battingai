@@ -3,11 +3,10 @@ import boto3
 import os
 
 s3_client = boto3.client('s3')
-bucket_name = os.environ['BUCKET_NAME']
+bucket_name = os.environ.get('BUCKET_NAME', 'battingai-videobucket-ayk9m1uehbg2')
 
 def lambda_handler(event, context):
-    """Get analysis results for a specific analysis ID"""
-    # Define CORS headers
+    """Get analysis results"""
     headers = {
         'Access-Control-Allow-Origin': 'https://jacobeee.github.io',
         'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Requested-With,Accept,Origin',
@@ -15,83 +14,50 @@ def lambda_handler(event, context):
         'Access-Control-Allow-Credentials': 'true'
     }
     
-    # Handle OPTIONS request (preflight)
-    if event.get('httpMethod') == 'OPTIONS':
-        print(f"Handling OPTIONS request with headers: {event.get('headers', {})}")
-        return {
-            'statusCode': 200,
-            'headers': headers,
-            'body': ''
-        }
-    
     try:
-        # Get analysis ID from path parameter
-        analysis_id = event['pathParameters']['analysisId']
+        # Get analysis ID from path parameters
+        analysis_id = event.get('pathParameters', {}).get('analysis_id')
+        if not analysis_id:
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({
+                    'error': 'Missing analysis_id parameter'
+                })
+            }
         
-        # Get metadata for the analysis
+        print(f"Getting results for analysis: {analysis_id}")
+        
+        # Try to get the metadata file
         try:
             response = s3_client.get_object(
                 Bucket=bucket_name,
                 Key=f"analyses/{analysis_id}/metadata.json"
             )
             metadata = json.loads(response['Body'].read().decode('utf-8'))
+            print(f"Found metadata for analysis: {analysis_id}")
+            
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps(metadata)
+            }
         except s3_client.exceptions.NoSuchKey:
-            return {
-                'statusCode': 404,
-                'headers': headers,
-                'body': json.dumps({
-                    'error': 'Analysis not found'
-                })
-            }
-        
-        # Check if feedback has been generated
-        if metadata['status'] == 'feedback_generated':
-            # Get feedback
-            response = s3_client.get_object(
-                Bucket=bucket_name,
-                Key=f"analyses/{analysis_id}/feedback.json"
-            )
-            feedback = json.loads(response['Body'].read().decode('utf-8'))
-            
+            # Metadata file doesn't exist yet, return processing status
+            print(f"Metadata not found for analysis: {analysis_id}")
             return {
                 'statusCode': 200,
                 'headers': headers,
                 'body': json.dumps({
                     'analysis_id': analysis_id,
-                    'status': metadata['status'],
-                    'results': feedback
-                })
-            }
-        elif metadata['status'] == 'comparison_complete':
-            # Get comparison results
-            response = s3_client.get_object(
-                Bucket=bucket_name,
-                Key=f"analyses/{analysis_id}/comparison_results.json"
-            )
-            comparison = json.loads(response['Body'].read().decode('utf-8'))
-            
-            return {
-                'statusCode': 200,
-                'headers': headers,
-                'body': json.dumps({
-                    'analysis_id': analysis_id,
-                    'status': metadata['status'],
-                    'results': comparison
-                })
-            }
-        else:
-            # Analysis is still in progress
-            return {
-                'statusCode': 200,
-                'headers': headers,
-                'body': json.dumps({
-                    'analysis_id': analysis_id,
-                    'status': metadata['status']
+                    'status': 'processing'
                 })
             }
         
     except Exception as e:
         print(f"Error getting results: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return {
             'statusCode': 500,
             'headers': headers,
