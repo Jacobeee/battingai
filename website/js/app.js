@@ -264,6 +264,9 @@ async function handleFormSubmit(event) {
     }
 }
 
+// S3 bucket name for accessing frame images
+const bucket_name = 'battingai-videobucket-ayk9m1uehbg2';
+
 // Function to display analysis results
 function displayResults(results, playerId) {
     console.log("Displaying results:", results);
@@ -362,12 +365,76 @@ function displayResults(results, playerId) {
         comparisonDiv.className = 'mb-3';
         comparisonDiv.innerHTML = '<h4>Frame-by-Frame Analysis</h4>';
         
+        // Create a card deck for frames
+        const cardDeck = document.createElement('div');
+        cardDeck.className = 'row row-cols-1 row-cols-md-3 g-4';
+        
+        // Define swing phase names
+        const phaseNames = ['Setup', 'Load', 'Swing', 'Contact', 'Follow-through'];
+        
+        results.results.comparison_results.forEach((frame, index) => {
+            // Create a card for each frame
+            const card = document.createElement('div');
+            card.className = 'col';
+            
+            // Get the frame image path
+            const framePath = results.frame_paths ? results.frame_paths[frame.frame_index] : null;
+            const imageUrl = framePath ? `https://${bucket_name}.s3.amazonaws.com/${framePath}` : '';
+            
+            // Determine the phase name based on index
+            const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
+            
+            // Create issues list
+            let issuesHtml = '';
+            if (frame.issues && frame.issues.length > 0) {
+                issuesHtml = '<ul class="list-group list-group-flush">';
+                frame.issues.forEach(issue => {
+                    issuesHtml += `<li class="list-group-item">${issue.description}</li>`;
+                });
+                issuesHtml += '</ul>';
+            } else {
+                issuesHtml = '<p class="card-text text-success">No issues detected</p>';
+            }
+            
+            // Set card content
+            card.innerHTML = `
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        ${phaseName} - Frame ${frame.frame_index + 1}
+                    </div>
+                    ${imageUrl ? `<img src="${imageUrl}" class="card-img-top" alt="Frame ${frame.frame_index + 1}">` : ''}
+                    <div class="card-body">
+                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
+                        <div class="progress mb-3">
+                            <div class="progress-bar" role="progressbar" style="width: ${Math.round(frame.similarity_score * 100)}%" 
+                                aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
+                            ${frame.issues && frame.issues.length > 0 ? 'Issues Detected:' : 'Perfect!'}
+                        </h6>
+                        ${issuesHtml}
+                    </div>
+                </div>
+            `;
+            
+            cardDeck.appendChild(card);
+        });
+        
+        comparisonDiv.appendChild(cardDeck);
+        container.appendChild(comparisonDiv);
+        
+        // Also add a traditional table view for comparison
+        const tableDiv = document.createElement('div');
+        tableDiv.className = 'mt-4';
+        tableDiv.innerHTML = '<h5>Detailed Metrics</h5>';
+        
         const table = document.createElement('table');
-        table.className = 'table table-striped';
+        table.className = 'table table-striped table-sm';
         table.innerHTML = `
             <thead>
                 <tr>
                     <th>Frame</th>
+                    <th>Phase</th>
                     <th>Similarity Score</th>
                     <th>Issues</th>
                 </tr>
@@ -375,10 +442,12 @@ function displayResults(results, playerId) {
             <tbody>
         `;
         
-        results.results.comparison_results.forEach(frame => {
+        results.results.comparison_results.forEach((frame, index) => {
+            const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
+            
             let issuesHtml = '';
             if (frame.issues && frame.issues.length > 0) {
-                issuesHtml = '<ul>';
+                issuesHtml = '<ul class="mb-0">';
                 frame.issues.forEach(issue => {
                     issuesHtml += `<li>${issue.description}</li>`;
                 });
@@ -390,6 +459,7 @@ function displayResults(results, playerId) {
             table.innerHTML += `
                 <tr>
                     <td>${frame.frame_index + 1}</td>
+                    <td>${phaseName}</td>
                     <td>${Math.round(frame.similarity_score * 100)}%</td>
                     <td>${issuesHtml}</td>
                 </tr>
@@ -397,8 +467,8 @@ function displayResults(results, playerId) {
         });
         
         table.innerHTML += '</tbody>';
-        comparisonDiv.appendChild(table);
-        container.appendChild(comparisonDiv);
+        tableDiv.appendChild(table);
+        comparisonDiv.appendChild(tableDiv);
     }
 }
 
