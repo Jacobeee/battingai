@@ -377,6 +377,13 @@ function displayResults(results, playerId) {
             const card = document.createElement('div');
             card.className = 'col';
             
+             // Get the frame URL from the results
+            const imageUrl = results.frame_urls && results.frame_urls.length > index ? 
+                results.frame_urls[index] : '';
+    
+            // Log the URL for debugging
+            console.log(`Frame ${index} URL:`, imageUrl);
+
             // Determine the phase name based on index
             const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
             
@@ -398,12 +405,15 @@ function displayResults(results, playerId) {
                     <div class="card-header bg-primary text-white">
                         ${phaseName} - Frame ${frame.frame_index + 1}
                     </div>
-                    <div class="text-center p-3 bg-light">
-                        <div class="swing-phase-icon" style="height: 100px; display: flex; align-items: center; justify-content: center;">
-                            <i class="bi bi-camera-video" style="font-size: 2rem;"></i>
-                            <div class="mt-2">Frame ${frame.frame_index + 1}</div>
-                        </div>
-                    </div>
+                    ${imageUrl ? 
+                        `<img src="${imageUrl}" class="card-img-top" alt="Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                        `<div class="text-center p-3 bg-light">
+                            <div class="swing-phase-icon" style="height: 100px; display: flex; align-items: center; justify-content: center;">
+                                <i class="bi bi-camera-video" style="font-size: 2rem;"></i>
+                                <div class="mt-2">Frame ${frame.frame_index + 1}</div>
+                            </div>
+                        </div>`
+                    }
                     <div class="card-body">
                         <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
                         <div class="progress mb-3">

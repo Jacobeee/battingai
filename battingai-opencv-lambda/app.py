@@ -84,7 +84,8 @@ def extract_frames(video_path, num_frames=5):
 def save_frames_to_s3(frames, analysis_id):
     """Save extracted frames to S3"""
     frame_paths = []
-    
+    frame_urls = []
+
     print(f"Saving {len(frames)} frames to S3 for analysis {analysis_id}")
     
     for i, frame in enumerate(frames):
@@ -100,6 +101,11 @@ def save_frames_to_s3(frames, analysis_id):
                 Body=buffer.tobytes(),
                 ContentType='image/jpeg'
             )
+
+             # Generate presigned URL
+            url = get_presigned_url(frame_key)
+            if url:
+                frame_urls.append(url)
             
             frame_paths.append(frame_key)
             print(f"Saved frame {i} to {frame_key}")
@@ -108,7 +114,7 @@ def save_frames_to_s3(frames, analysis_id):
             raise
     
     print(f"Successfully saved {len(frame_paths)} frames to S3")
-    return frame_paths
+    return frame_paths, frame_urls
 
 def get_reference_frames(player_id, num_frames=5):
     """Get reference frames for the specified player"""
@@ -155,6 +161,23 @@ def get_reference_frames(player_id, num_frames=5):
         print(traceback.format_exc())
     
     return reference_frames
+
+def get_presigned_url(key, expiration=3600):
+    """Generate a presigned URL for an S3 object"""
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': bucket_name,
+                'Key': key
+            },
+            ExpiresIn=expiration
+        )
+        return url
+    except Exception as e:
+        print(f"Error generating presigned URL for {key}: {str(e)}")
+        return None
+
 
 def compare_frames(user_frames, reference_frames):
     """Compare user frames with reference frames"""
@@ -410,7 +433,7 @@ def lambda_handler(event, context):
                     print(f"Error cleaning up temp file: {str(e)}")
         
         # Save frames to S3
-        frame_paths = save_frames_to_s3(frames, analysis_id)
+        frame_paths, frame_urls = save_frames_to_s3(frames, analysis_id)
         
         # Get reference frames for the selected player
         reference_frames = get_reference_frames(player_id)
@@ -453,6 +476,7 @@ def lambda_handler(event, context):
             "status": "feedback_generated",
             "player_id": player_id,
             "frame_paths": frame_paths,
+            "frame_urls": frame_urls,
             "results": feedback
         }
         
