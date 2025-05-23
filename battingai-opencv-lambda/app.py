@@ -119,7 +119,8 @@ def save_frames_to_s3(frames, analysis_id):
 def get_reference_frames(player_id, num_frames=5):
     """Get reference frames for the specified player"""
     reference_frames = []
-    
+    reference_urls = []
+
     try:
         # List reference frames for the player
         response = s3_client.list_objects_v2(
@@ -151,6 +152,9 @@ def get_reference_frames(player_id, num_frames=5):
                     # Resize for consistency
                     img = cv2.resize(img, (640, 360))
                     reference_frames.append(img)
+                    url = get_presigned_url(key)
+                    if  url:
+                        reference_urls.append(url)
                     print(f"Loaded reference frame: {key}")
                 else:
                     print(f"Failed to decode reference frame: {key}")
@@ -160,7 +164,7 @@ def get_reference_frames(player_id, num_frames=5):
         print(f"Error loading reference frames: {str(e)}")
         print(traceback.format_exc())
     
-    return reference_frames
+    return reference_frames, reference_urls
 
 def get_presigned_url(key, expiration=3600):
     """Generate a presigned URL for an S3 object"""
@@ -436,7 +440,7 @@ def lambda_handler(event, context):
         frame_paths, frame_urls = save_frames_to_s3(frames, analysis_id)
         
         # Get reference frames for the selected player
-        reference_frames = get_reference_frames(player_id)
+        reference_frames, reference_urls = get_reference_frames(player_id)
         
         # Compare user frames with reference frames
         comparison_results = compare_frames(frames, reference_frames)
@@ -477,6 +481,7 @@ def lambda_handler(event, context):
             "player_id": player_id,
             "frame_paths": frame_paths,
             "frame_urls": frame_urls,
+            "reference_urls": reference_urls,
             "results": feedback
         }
         

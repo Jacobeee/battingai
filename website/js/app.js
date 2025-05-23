@@ -405,15 +405,36 @@ function displayResults(results, playerId) {
                     <div class="card-header bg-primary text-white">
                         ${phaseName} - Frame ${frame.frame_index + 1}
                     </div>
-                    ${imageUrl ? 
-                        `<img src="${imageUrl}" class="card-img-top" alt="Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
-                        `<div class="text-center p-3 bg-light">
-                            <div class="swing-phase-icon" style="height: 100px; display: flex; align-items: center; justify-content: center;">
-                                <i class="bi bi-camera-video" style="font-size: 2rem;"></i>
-                                <div class="mt-2">Frame ${frame.frame_index + 1}</div>
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Your Swing</h6>
+                                ${imageUrl ? 
+                                    `<img src="${imageUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                    `<div class="text-center p-3 bg-light">
+                                        <div class="swing-phase-icon">
+                                            <i class="bi bi-camera-video"></i>
+                                            <div class="mt-2">Frame ${frame.frame_index + 1}</div>
+                                        </div>
+                                    </div>`
+                                }
                             </div>
-                        </div>`
-                    }
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Reference</h6>
+                                ${results.reference_urls && results.reference_urls.length > index ? 
+                                    `<img src="${results.reference_urls[index]}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                    `<div class="text-center p-3 bg-light">
+                                        <div class="swing-phase-icon">
+                                            <i class="bi bi-camera-video"></i>
+                                            <div class="mt-2">Reference ${frame.frame_index + 1}</div>
+                                        </div>
+                                    </div>`
+                                }
+                            </div>
+                        </div>
+                    </div>
                     <div class="card-body">
                         <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
                         <div class="progress mb-3">
@@ -427,6 +448,7 @@ function displayResults(results, playerId) {
                     </div>
                 </div>
             `;
+
             
             cardDeck.appendChild(card);
         });
