@@ -62,10 +62,18 @@ def compare_frames(user_frames, reference_frames):
     
     results = []
     
-    # Ensure we have the same number of frames to compare
-    min_frames = min(len(user_frames), len(reference_frames))
+    # Define swing phases
+    phases = ['setup', 'load', 'swing', 'contact', 'follow-through']
     
-    for i in range(min_frames):
+    # Ensure we have 5 frames from each video (one per phase)
+    if len(user_frames) != 5 or len(reference_frames) != 5:
+        print(f"Warning: Expected 5 frames per video, got {len(user_frames)} and {len(reference_frames)}")
+    
+    # Compare corresponding frames from each phase
+    for i, phase in enumerate(phases):
+        if i >= len(user_frames) or i >= len(reference_frames):
+            break
+            
         user_frame = user_frames[i]
         ref_frame = reference_frames[i]
         
@@ -80,32 +88,69 @@ def compare_frames(user_frames, reference_frames):
         # Compare histograms
         similarity = cv2.compareHist(user_hist, ref_hist, cv2.HISTCMP_CORREL)
         
-        # In a real application, you would use pose estimation to compare specific body positions
-        # For this example, we'll use a simplified approach
+        # For identical videos, similarity should be very close to 1.0
+        adjusted_similarity = similarity * 100  # Convert to percentage
+        
+        # Basic image analysis for stance detection
+        user_height, user_width = user_frame.shape[:2]
+        ref_height, ref_width = ref_frame.shape[:2]
+        
+        # Calculate lower half of image (where feet would be)
+        user_lower_half = user_frame[user_height//2:, :]
+        ref_lower_half = ref_frame[ref_height//2:, :]
+        
+        # Convert to grayscale for edge detection
+        user_gray = cv2.cvtColor(user_lower_half, cv2.COLOR_BGR2GRAY)
+        ref_gray = cv2.cvtColor(ref_lower_half, cv2.COLOR_BGR2GRAY)
+        
+        # Simple edge detection
+        user_edges = cv2.Canny(user_gray, 100, 200)
+        ref_edges = cv2.Canny(ref_gray, 100, 200)
+        
+        # Count edge pixels as a simple measure of stance width
+        user_edge_count = np.count_nonzero(user_edges)
+        ref_edge_count = np.count_nonzero(ref_edges)
+        
+        # Compare stance widths
+        stance_diff = abs(user_edge_count - ref_edge_count) / max(user_edge_count, ref_edge_count)
+        stance_similarity = 100 * (1 - stance_diff)
+        
+        # Combined score (weighted average of histogram and stance similarities)
+        if phase == 'setup':
+            # For setup phase, stance is more important
+            final_score = 0.3 * adjusted_similarity + 0.7 * stance_similarity
+        else:
+            # For other phases, overall position (histogram) is more important
+            final_score = 0.7 * adjusted_similarity + 0.3 * stance_similarity
+        
+        # Analyze specific issues based on the phase
+        issues = []
+        if final_score < 90:  # Threshold for identifying issues
+            if phase == 'setup':
+                if stance_similarity < 90:
+                    issues.append({
+                        'type': 'stance',
+                        'description': 'Your stance width differs from the reference'
+                    })
+            elif phase == 'load':
+                if adjusted_similarity < 90:
+                    issues.append({
+                        'type': 'loading',
+                        'description': 'Your loading position differs from the reference'
+                    })
+            elif phase == 'swing':
+                if adjusted_similarity < 90:
+                    issues.append({
+                        'type': 'swing_path',
+                        'description': 'Your swing path differs from the reference'
+                    })
         
         results.append({
             'frame_index': i,
-            'similarity_score': float(similarity),
-            'issues': []
+            'phase': phase,
+            'similarity_score': round(final_score, 2),
+            'issues': issues
         })
-        
-        # Add mock issues based on similarity score
-        if similarity < 0.5:
-            if i < 3:  # Early frames - setup and stance
-                results[i]['issues'].append({
-                    'type': 'stance',
-                    'description': 'Your stance is too narrow compared to the reference'
-                })
-            elif i < 6:  # Middle frames - swing initiation
-                results[i]['issues'].append({
-                    'type': 'hip_rotation',
-                    'description': 'Your hip rotation is delayed compared to the reference'
-                })
-            else:  # Late frames - follow through
-                results[i]['issues'].append({
-                    'type': 'follow_through',
-                    'description': 'Your follow-through is incomplete compared to the reference'
-                })
     
     return results
 

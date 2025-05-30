@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<!-- saved from url=(0037)https://jacobeee.github.io/battingai/ -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BattingAI - Baseball Swing Analysis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com/">
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
+    <link href="./BattingAI - Baseball Swing Analysis_files/css2" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4361ee;
+            --primary-light: #4895ef;
+            --secondary: #3f37c9;
+            --success: #4cc9f0;
+            --danger: #f72585;
+            --warning: #f8961e;
+            --info: #90e0ef;
+            --dark: #1b263b;
+            --light: #f8f9fa;
+            --body-bg: #f5f7fa;
+            --card-bg: #ffffff;
+            --text: #2b2d42;
+            --text-light: #6c757d;
+            --border-radius: 12px;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--body-bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 1140px;
+            margin: 0 auto;
+            padding: 0 15px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .header h1 {
+            font-weight: 700;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            color: var(--text-light);
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-bottom: 2rem;
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .card:hover {
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+            transform: translateY(-5px);
+        }
+
+        .card-header {
+            background-color: var(--primary);
+            color: white;
+            padding: 1.5rem;
+            font-weight: 600;
+        }
+
+        .card-body {
+            padding: 1.5rem;
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+            border: 1px solid #dee2e6;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
+            transition: var(--transition);
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.25);
+        }
+
+        .btn {
+            display: inline-block;
+            font-weight: 500;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: middle;
+            user-select: none;
+            border: 1px solid transparent;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            line-height: 1.5;
+            border-radius: var(--border-radius);
+            transition: var(--transition);
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            color: #fff;
+            background-color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--secondary);
+            border-color: var(--secondary);
+        }
+
+        .progress {
+            height: 0.75rem;
+            background-color: #e9ecef;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: var(--primary);
+            transition: width 0.3s ease;
+        }
+
+        #uploadProgress {
+            display: none;
+        }
+
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            margin: 2rem 0;
+        }
+
+        .spinner-border {
+            display: inline-block;
+            width: 2rem;
+            height: 2rem;
+            vertical-align: text-bottom;
+            border: 0.25em solid var(--primary);
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spinner-border 0.75s linear infinite;
+        }
+
+        @keyframes spinner-border {
+            to { transform: rotate(360deg); }
+        }
+
+        #analysisResults {
+            display: none;
+        }
+
+        .alert {
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: var(--border-radius);
+        }
+
+        .alert-info {
+            background-color: var(--info);
+            color: var(--dark);
+        }
+
+        .alert-success {
+            background-color: var(--success);
+            color: var(--dark);
+        }
+
+        .issue-card {
+            margin-bottom: 1.5rem;
+            border-left: 4px solid var(--primary);
+        }
+
+        .issue-card .card-header {
+            background-color: rgba(67, 97, 238, 0.1);
+            color: var(--primary);
+        }
+
+        .issue-card h5 {
+            margin: 0;
+            text-transform: capitalize;
+        }
+
+        .issue-card h6 {
+            color: var(--primary);
+            margin-top: 1.2rem;
+            margin-bottom: 0.7rem;
+            font-weight: 600;
+            border-bottom: 1px solid rgba(67, 97, 238, 0.2);
+            padding-bottom: 0.3rem;
+        }
+
+        .issue-card ul {
+            padding-left: 1.5rem;
+            margin-bottom: 1rem;
+            list-style-type: circle;
+        }
+
+        .issue-card li {
+            margin-bottom: 0.5rem;
+            line-height: 1.5;
+        }
+
+        .issue-card a {
+            color: var(--primary);
+            text-decoration: none;
+            transition: var(--transition);
+            font-weight: 500;
+        }
+
+        .issue-card a:hover {
+            color: var(--secondary);
+            text-decoration: underline;
+        }
+
+        .issue-description {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            .card-title {
+                font-size: 1.25rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>BattingAI</h1>
+            <p>Upload your batting video for professional analysis</p>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title">Upload Your Batting Video</h2>
+                <p>Select a video file of your baseball swing (preferably side view)</p>
+                
+                <form id="uploadForm">
+                    <div>
+                        <label for="videoFile" class="form-label">Video File</label>
+                        <input class="form-control" type="file" id="videoFile" accept="video/*">
+                    </div>
+                    
+                    <div>
+                        <label for="playerSelect" class="form-label">Compare with MLB Player</label>
+                        <select class="form-control" id="playerSelect">
+                            <option value="bryce_harper">Bryce Harper</option>
+                            <option value="brandon_lowe">Brandon Lowe</option>
+                        </select>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Upload &amp; Analyze</button><button class="btn btn-secondary" style="margin-left: 10px;">Debug API Connection</button>
+                </form>
+                
+                <div id="uploadProgress" style="display: none;">
+                    <div class="progress">
+                        <div class="progress-bar" role="progressbar" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="loading-spinner" id="loadingSpinner" style="display: none;">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p id="statusMessage">Getting results...</p>
+        </div>
+
+        <div id="analysisResults">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Analysis Results</h2>
+                </div>
+                <div class="card-body">
+                    <h3 class="card-subtitle">Compared with: <span id="comparedPlayer"></span></h3>
+                    <div class="alert alert-info" id="resultSummary"></div>
+                    
+                    <h3>Identified Issues:</h3>
+                    <div id="issuesContainer"></div>
+                </div>
+            </div>
+        </div>
+    <div id="resultsContainer" class="mt-4 p-4 border rounded bg-light"><h3>Swing Analysis Results</h3><p><strong>Compared to:</strong> Brandon Lowe</p><div class="mb-3">
+            <h4>Overall Score: 84/100</h4>
+            <div class="progress">
+                <div class="progress-bar" role="progressbar" style="width: 84%" aria-valuenow="84" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+        </div><div class="mb-3"><h4>Strengths</h4><ul></ul><li>Good overall form matching the professional reference</li><li>Excellent stance preparation</li></div><div class="mb-3"><h4>Areas to Improve</h4><ul></ul><li>Fine-tune your follow-through for even better results</li></div><div class="mb-3">
+            <h4>Detailed Feedback</h4>
+            <p>Your swing shows excellent potential with a similarity score of 84/100 compared to the reference player. Your key strength is good overall form matching the professional reference. To improve, focus on fine-tune your follow-through for even better results.</p>
+        </div><div class="mb-3"><h4>Frame-by-Frame Analysis</h4><div class="row row-cols-1 row-cols-md-3 g-4"><div class="col">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        Setup - Frame 1
+                    </div>
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Your Swing</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_0.jpg" class="img-fluid" alt="Your Frame 1" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Reference</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_0(1).jpg" class="img-fluid" alt="Reference Frame 1" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">Similarity: 98%</h5>
+                        <div class="progress mb-3">
+                            <div class="progress-bar" role="progressbar" style="width: 98%" aria-valuenow="98" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <h6 class="card-subtitle mb-2 text-success">
+                            Perfect!
+                        </h6>
+                        <p class="card-text text-success">No issues detected</p>
+                    </div>
+                </div>
+            </div><div class="col">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        Load - Frame 2
+                    </div>
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Your Swing</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_1.jpg" class="img-fluid" alt="Your Frame 2" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Reference</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_1(1).jpg" class="img-fluid" alt="Reference Frame 2" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">Similarity: 87%</h5>
+                        <div class="progress mb-3">
+                            <div class="progress-bar" role="progressbar" style="width: 87%" aria-valuenow="87" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <h6 class="card-subtitle mb-2 text-success">
+                            Perfect!
+                        </h6>
+                        <p class="card-text text-success">No issues detected</p>
+                    </div>
+                </div>
+            </div><div class="col">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        Swing - Frame 3
+                    </div>
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Your Swing</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_2.jpg" class="img-fluid" alt="Your Frame 3" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Reference</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_2(1).jpg" class="img-fluid" alt="Reference Frame 3" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">Similarity: 81%</h5>
+                        <div class="progress mb-3">
+                            <div class="progress-bar" role="progressbar" style="width: 81%" aria-valuenow="81" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <h6 class="card-subtitle mb-2 text-success">
+                            Perfect!
+                        </h6>
+                        <p class="card-text text-success">No issues detected</p>
+                    </div>
+                </div>
+            </div><div class="col">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        Contact - Frame 4
+                    </div>
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Your Swing</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_3.jpg" class="img-fluid" alt="Your Frame 4" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Reference</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_3(1).jpg" class="img-fluid" alt="Reference Frame 4" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">Similarity: 80%</h5>
+                        <div class="progress mb-3">
+                            <div class="progress-bar" role="progressbar" style="width: 80%" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <h6 class="card-subtitle mb-2 text-success">
+                            Perfect!
+                        </h6>
+                        <p class="card-text text-success">No issues detected</p>
+                    </div>
+                </div>
+            </div><div class="col">
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        Follow-through - Frame 5
+                    </div>
+                    <div class="row g-0">
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Your Swing</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_4.jpg" class="img-fluid" alt="Your Frame 5" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2">
+                                <h6 class="text-center mb-2">Reference</h6>
+                                <img src="./BattingAI - Baseball Swing Analysis_files/frame_4(1).jpg" class="img-fluid" alt="Reference Frame 5" style="max-height: 200px; object-fit: contain;">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <h5 class="card-title">Similarity: 77%</h5>
+                        <div class="progress mb-3">
+                            <div class="progress-bar" role="progressbar" style="width: 77%" aria-valuenow="77" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <h6 class="card-subtitle mb-2 text-success">
+                            Perfect!
+                        </h6>
+                        <p class="card-text text-success">No issues detected</p>
+                    </div>
+                </div>
+            </div></div><div class="mt-4"><h5>Detailed Metrics</h5><table class="table table-striped table-sm">
+            <thead>
+                <tr>
+                    <th>Frame</th>
+                    <th>Phase</th>
+                    <th>Similarity Score</th>
+                    <th>Issues</th>
+                </tr>
+            </thead>
+            <tbody>
+        </tbody>
+                <tbody><tr>
+                    <td>1</td>
+                    <td>Setup</td>
+                    <td>98%</td>
+                    <td>No issues detected</td>
+                </tr>
+            </tbody>
+                <tbody><tr>
+                    <td>2</td>
+                    <td>Load</td>
+                    <td>87%</td>
+                    <td>No issues detected</td>
+                </tr>
+            </tbody>
+                <tbody><tr>
+                    <td>3</td>
+                    <td>Swing</td>
+                    <td>81%</td>
+                    <td>No issues detected</td>
+                </tr>
+            </tbody>
+                <tbody><tr>
+                    <td>4</td>
+                    <td>Contact</td>
+                    <td>80%</td>
+                    <td>No issues detected</td>
+                </tr>
+            </tbody>
+                <tbody><tr>
+                    <td>5</td>
+                    <td>Follow-through</td>
+                    <td>77%</td>
+                    <td>No issues detected</td>
+                </tr>
+            </tbody></table></div></div></div></div>
+
+    <script src="./BattingAI - Baseball Swing Analysis_files/app.js.download"></script>
+
+</body></html>

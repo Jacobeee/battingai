@@ -19,7 +19,7 @@ lambda_client = boto3.client('lambda')
 bucket_name = os.environ.get('BUCKET_NAME', 'battingai-videobucket-ayk9m1uehbg2')
 
 def extract_frames(video_path, num_frames=5):
-    """Extract key frames from a video file"""
+    """Extract key frames from important swing phases using consistent motion detection"""
     if not OPENCV_AVAILABLE:
         print("OpenCV not available, returning mock frames")
         return ["mock_frame"] * num_frames
@@ -30,36 +30,135 @@ def extract_frames(video_path, num_frames=5):
     if not cap.isOpened():
         raise Exception(f"Could not open video file: {video_path}")
     
-    # Get video properties
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    # Read all frames
+    all_frames = []
+    prev_frame = None
+    motion_scores = []
     
-    print(f"Video properties: frames={frame_count}, fps={fps}")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        # Resize for consistency with analysis
+        frame = cv2.resize(frame, (640, 360))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        if prev_frame is not None:
+            # Calculate frame difference
+            diff = cv2.absdiff(prev_frame, gray)
+            motion = np.mean(diff)
+            motion_scores.append((len(all_frames), motion))
+            
+        prev_frame = gray
+        all_frames.append(frame)
     
-    if frame_count <= 0:
-        raise Exception(f"Invalid frame count: {frame_count}")
+    cap.release()
     
-    # Extract frames at regular intervals
-    frames = []
-    step = max(1, frame_count // num_frames)
+    if len(all_frames) < 5:
+        print("Not enough frames, using regular interval sampling")
+        indices = [0]
+        step = (len(all_frames) - 1) / 4
+        for i in range(1, 4):
+            indices.append(min(len(all_frames) - 1, int(i * step)))
+        indices.append(len(all_frames) - 1)
+        return [all_frames[i] for i in indices]
     
-    for i in range(0, min(frame_count, num_frames * step), step):
+    # First pass: detect motion to find the swing
+    for i in range(frame_count):
         cap.set(cv2.CAP_PROP_POS_FRAMES, i)
         ret, frame = cap.read()
+        if not ret:
+            continue
+        
+        # Resize frame for faster processing
+        frame = cv2.resize(frame, (320, 180))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        if prev_frame is not None:
+            # Calculate frame difference
+            diff = cv2.absdiff(prev_frame, gray)
+            motion = np.mean(diff)
+            motion_frames.append((i, motion))
+            max_motion = max(max_motion, motion)
+        
+        prev_frame = gray
+    
+    # Find the swing sequence
+    if not motion_frames:
+        raise Exception("No motion detected in video")
+    
+    # Find the peak of motion (contact point)
+    contact_frame = max(motion_frames, key=lambda x: x[1])[0]
+    
+    # Define swing phases relative to contact
+    setup_frame = max(0, contact_frame - int(fps * 1.0))  # 1 second before contact
+    load_frame = max(0, contact_frame - int(fps * 0.5))   # 0.5 seconds before contact
+    swing_frame = max(0, contact_frame - int(fps * 0.2))  # 0.2 seconds before contact
+    followthrough_frame = min(frame_count - 1, contact_frame + int(fps * 0.3))  # 0.3 seconds after contact
+    
+    # Collect frames from each phase
+    phase_frames = [setup_frame, load_frame, swing_frame, contact_frame, followthrough_frame]
+    frames = []
+    
+    for frame_idx in phase_frames:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
         if ret:
-            # Resize frame to reduce memory usage
-            frame = cv2.resize(frame, (640, 360))
             frames.append(frame)
-            print(f"Extracted frame at position {i}")
+            print(f"Extracted frame at position {frame_idx}")
         else:
-            print(f"Failed to read frame at position {i}")
+            print(f"Failed to read frame at position {frame_idx}")
     
     cap.release()
     
     if not frames:
         raise Exception("No frames could be extracted from the video")
     
-    return frames
+    # Convert motion_scores list of tuples to separate lists
+    if not motion_scores:
+        # If no motion detected, use evenly spaced frames
+        indices = [0] + [i * (len(all_frames) - 1) // 4 for i in range(1, 4)] + [len(all_frames) - 1]
+        return [all_frames[i] for i in indices]
+
+    frame_indices, scores = zip(*motion_scores)
+    scores = np.array(scores)
+    
+    # Normalize scores
+    scores = (scores - np.min(scores)) / (np.max(scores) - np.min(scores) + 1e-6)
+    
+    # Find key frames
+    # Setup (0) - start of sequence
+    setup_idx = 0
+    
+    # Contact (3) - frame with highest motion
+    contact_idx = frame_indices[np.argmax(scores)]
+    
+    # Load (1) - significant motion change before contact
+    pre_contact_scores = scores[:contact_idx]
+    if len(pre_contact_scores) > 0:
+        load_idx = np.argmin(pre_contact_scores[:contact_idx//2])
+    else:
+        load_idx = max(0, contact_idx // 3)
+    
+    # Swing (2) - halfway between load and contact
+    swing_idx = load_idx + (contact_idx - load_idx) // 2
+    
+    # Follow-through (4) - after contact with decreasing motion
+    followthrough_idx = min(len(all_frames) - 1, contact_idx + (len(all_frames) - contact_idx) // 2)
+    
+    # Combine phases and ensure proper spacing
+    phases = [setup_idx, load_idx, swing_idx, contact_idx, followthrough_idx]
+    phases.sort()
+    
+    # Ensure minimum spacing between frames
+    min_spacing = len(all_frames) // 20  # At least 5% of total frames apart
+    for i in range(1, len(phases)):
+        if phases[i] - phases[i-1] < min_spacing:
+            phases[i] = min(phases[i-1] + min_spacing, len(all_frames) - 1)
+    
+    print(f"Detected swing phases at frames: {phases}")
+    return [all_frames[i] for i in phases]
 
 def save_frames_to_s3(frames, analysis_id):
     """Save extracted frames to S3"""
