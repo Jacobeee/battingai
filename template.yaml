@@ -145,8 +145,7 @@ Resources:
             Path: /analyze
             Method: post
 
-  # Lambda function for API endpoint to get analysis results
-  GetResultsFunction:
+  # Lambda function for API endpoint to get analysis results  GetResultsFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/get_results/
@@ -162,7 +161,7 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref BattingAIApi
-            Path: /results/{analysisId}
+            Path: /results/{analysis_id}
             Method: get
 
 Outputs:

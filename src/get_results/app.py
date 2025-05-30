@@ -15,14 +15,21 @@ def lambda_handler(event, context):
     }
     
     try:
-        # Get analysis ID from path parameters
-        analysis_id = event.get('pathParameters', {}).get('analysis_id')
+        # Get analysis ID from path parameters (check both formats)
+        path_params = event.get('pathParameters', {})
+        analysis_id = path_params.get('analysis_id') or path_params.get('analysisId')
+        
+        # Log the event structure for debugging
+        print(f"Path parameters: {path_params}")
+        
         if not analysis_id:
             return {
                 'statusCode': 400,
                 'headers': headers,
                 'body': json.dumps({
-                    'error': 'Missing analysis_id parameter'
+                    'error': 'Missing analysis ID in path parameters',
+                    'path_params': path_params,
+                    'event': event
                 })
             }
         
