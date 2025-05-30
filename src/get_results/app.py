@@ -46,7 +46,9 @@ def lambda_handler(event, context):
                         Key=f"analyses/{analysis_id}/comparison_results.json"
                     )
                     comparison_results = json.loads(results_response['Body'].read().decode('utf-8'))
+                    # Update metadata with comparison results and mark as completed
                     metadata.update(comparison_results)  # Merge comparison results into metadata
+                    metadata['status'] = 'comparison_complete'
                 except s3_client.exceptions.NoSuchKey:
                     print(f"Warning: Comparison results not found for completed analysis: {analysis_id}")
 

@@ -221,10 +221,11 @@ async function handleFormSubmit(event) {
                         console.error('Error parsing results response:', e);
                         continue;
                     }
-                    
-                    if (data.status === 'feedback_generated') {
+                      if (data.status === 'comparison_complete' || data.status === 'feedback_generated') {
                         results = data;
                         break;
+                    } else if (data.error) {
+                        throw new Error(data.error);
                     } else {
                         console.log('Results not ready yet, status:', data.status);
                     }
