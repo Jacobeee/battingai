@@ -436,10 +436,10 @@ function displayResults(results, playerId) {
                             </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
+                    <div class="card-body">                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
                         <div class="progress mb-3">
-                            <div class="progress-bar" role="progressbar" style="width: ${Math.round(frame.similarity_score * 100)}%" 
+                            <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
+                                style="width: ${Math.round(frame.similarity_score * 100)}%" 
                                 aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
                         </div>
                         <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
@@ -489,12 +489,22 @@ function displayResults(results, playerId) {
             } else {
                 issuesHtml = 'No issues detected';
             }
-            
-            table.innerHTML += `
+              table.innerHTML += `
                 <tr>
                     <td>${frame.frame_index + 1}</td>
                     <td>${phaseName}</td>
-                    <td>${Math.round(frame.similarity_score * 100)}%</td>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <div class="progress flex-grow-1" style="height: 20px;">
+                                <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
+                                    style="width: ${Math.round(frame.similarity_score * 100)}%" 
+                                    aria-valuenow="${Math.round(frame.similarity_score * 100)}" 
+                                    aria-valuemin="0" aria-valuemax="100">
+                                </div>
+                            </div>
+                            <span class="ms-2">${Math.round(frame.similarity_score * 100)}%</span>
+                        </div>
+                    </td>
                     <td>${issuesHtml}</td>
                 </tr>
             `;

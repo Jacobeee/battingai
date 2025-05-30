@@ -30,13 +30,26 @@ def lambda_handler(event, context):
         
         # Try to get the metadata file
         try:
-            response = s3_client.get_object(
+            # Get metadata
+            metadata_response = s3_client.get_object(
                 Bucket=bucket_name,
                 Key=f"analyses/{analysis_id}/metadata.json"
             )
-            metadata = json.loads(response['Body'].read().decode('utf-8'))
+            metadata = json.loads(metadata_response['Body'].read().decode('utf-8'))
             print(f"Found metadata for analysis: {analysis_id}")
-            
+
+            # If processing is complete, get comparison results
+            if metadata.get('status') == 'comparison_complete':
+                try:
+                    results_response = s3_client.get_object(
+                        Bucket=bucket_name,
+                        Key=f"analyses/{analysis_id}/comparison_results.json"
+                    )
+                    comparison_results = json.loads(results_response['Body'].read().decode('utf-8'))
+                    metadata.update(comparison_results)  # Merge comparison results into metadata
+                except s3_client.exceptions.NoSuchKey:
+                    print(f"Warning: Comparison results not found for completed analysis: {analysis_id}")
+
             return {
                 'statusCode': 200,
                 'headers': headers,

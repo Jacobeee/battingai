@@ -460,31 +460,88 @@ def compare_frames(user_frames, reference_frames):
         
         # Add overlay to annotated images with 50% transparency
         cv2.addWeighted(user_annotated, 0.7, pose_overlay, 0.3, 0, user_annotated)
+          # Calculate edge ratio for stance analysis
+        user_gray = cv2.cvtColor(user_frame, cv2.COLOR_BGR2GRAY)
+        ref_gray = cv2.cvtColor(ref_frame, cv2.COLOR_BGR2GRAY)
+        user_edges = cv2.Canny(user_gray, 100, 200)
+        ref_edges = cv2.Canny(ref_gray, 100, 200)
         
-        # Calculate similarity score
-        similarity_score = 1.0 - (np.sum(pose_difference) / (pose_difference.shape[0] * pose_difference.shape[1] * 255))
+        # Calculate edge ratio
+        user_edge_count = np.count_nonzero(user_edges)
+        ref_edge_count = np.count_nonzero(ref_edges)
+        edge_ratio = min(user_edge_count, ref_edge_count) / max(user_edge_count, ref_edge_count) if max(user_edge_count, ref_edge_count) > 0 else 0
         
-        # Generate annotations
+        # Calculate stance similarity
+        stance_diff = abs(user_edge_count - ref_edge_count) / max(user_edge_count, ref_edge_count)
+        stance_similarity = 1.0 - stance_diff  # Keep as decimal between 0 and 1
+        
+        # Calculate histogram similarity
+        user_hist = cv2.calcHist([user_frame], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+        ref_hist = cv2.calcHist([ref_frame], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+        cv2.normalize(user_hist, user_hist)
+        cv2.normalize(ref_hist, ref_hist)
+        hist_similarity = max(0, min(1, cv2.compareHist(user_hist, ref_hist, cv2.HISTCMP_CORREL)))
+        
+        # Calculate pose similarity from difference matrix
+        pose_similarity = 1.0 - (np.sum(pose_difference) / (pose_difference.shape[0] * pose_difference.shape[1] * 255))
+          # Combined weighted score with phase-specific weights
+        if i == 0:  # Setup phase - emphasize stance and posture
+            similarity_score = 0.3 * pose_similarity + 0.2 * hist_similarity + 0.5 * stance_similarity
+        elif i == len(user_frames) - 1:  # Follow-through - emphasize pose and form
+            similarity_score = 0.5 * pose_similarity + 0.3 * hist_similarity + 0.2 * stance_similarity
+        else:  # Other phases - balanced scoring
+            similarity_score = 0.4 * pose_similarity + 0.3 * hist_similarity + 0.3 * stance_similarity
+            
+        # Ensure score is between 0 and 1
+        similarity_score = max(0, min(1, similarity_score))
+        
+        # Generate annotations and issues based on specific thresholds
         annotations = []
+        issues = []
         
-        # Add pose difference annotations
-        if np.sum(significant_diff) > 0:
+        # Add pose difference annotations with specific thresholds
+        if pose_similarity < 0.7:
+            magnitude = 1.0 - pose_similarity
+            desc = 'Minor' if magnitude < 0.4 else 'Significant' if magnitude < 0.6 else 'Major'
             annotations.append({
                 'type': 'pose_difference',
-                'magnitude': float(np.sum(significant_diff)) / (significant_diff.shape[0] * significant_diff.shape[1]),
-                'description': 'Significant pose difference detected'
+                'magnitude': magnitude,
+                'description': f'{desc} pose difference detected'
             })
-        
-        # Add bat position annotations
+            issues.append({
+                'type': 'pose',
+                'severity': desc.lower(),
+                'description': f'{desc} body position adjustment needed to match the reference'
+            })
+          # Add bat position annotations with detailed analysis
         if user_bat and ref_bat:
+            # Calculate differences in position and angle
             bat_x_diff = abs(user_bat['x'] - ref_bat['x'])
             bat_y_diff = abs(user_bat['y'] - ref_bat['y'])
-            if bat_x_diff > 20 or bat_y_diff > 20:
+            
+            # Normalize differences relative to frame size
+            norm_x_diff = bat_x_diff / user_frame.shape[1]
+            norm_y_diff = bat_y_diff / user_frame.shape[0]
+            
+            # Calculate weighted bat position difference
+            bat_diff = np.sqrt(norm_x_diff**2 + norm_y_diff**2)
+            
+            # Determine severity of bat position difference
+            if bat_diff > 0.05:  # More than 5% of frame size
+                severity = 'Minor' if bat_diff < 0.1 else 'Significant' if bat_diff < 0.2 else 'Major'
+                description = f'{severity} bat position difference detected'
+                
+                # Add detailed position analysis
+                if norm_x_diff > norm_y_diff:
+                    description += ' - horizontal alignment needs adjustment'
+                else:
+                    description += ' - vertical alignment needs adjustment'
+                
                 annotations.append({
                     'type': 'bat_position',
-                    'magnitude': float(bat_x_diff + bat_y_diff) / (user_frame.shape[1] + user_frame.shape[0]),
+                    'magnitude': float(bat_diff),
                     'region': {'x': user_bat['x'], 'y': user_bat['y'], 'w': user_bat['w'], 'h': user_bat['h']},
-                    'description': 'Bat position differs from reference'
+                    'description': description
                 })
         
         # Generate drills based on identified issues
@@ -514,10 +571,25 @@ def compare_frames(user_frames, reference_frames):
                     'Practice with slow, controlled movements initially'
                 ]
             })
+          # Calculate detailed metrics
+        detailed_metrics = {
+            'pose_similarity': float(pose_similarity),
+            'stance_similarity': float(stance_similarity),
+            'hist_similarity': float(hist_similarity),
+            'edge_ratio': float(edge_ratio)
+        }
+        
+        # Determine swing phase
+        phase_names = ['Setup', 'Load', 'Swing', 'Contact', 'Follow-through']
+        phase_name = phase_names[i] if i < len(phase_names) else f'Frame {i}'
         
         comparison_results.append({
-            'frame_index': i,            'similarity_score': float(similarity_score),
+            'frame_index': i,
+            'phase_name': phase_name,
+            'similarity_score': float(similarity_score),
+            'detailed_metrics': detailed_metrics,
             'annotations': annotations,
+            'issues': issues,
             'drills': drills,
             'user_annotated': base64.b64encode(cv2.imencode('.jpg', user_annotated)[1].tobytes()).decode('utf-8'),
             'ref_annotated': base64.b64encode(cv2.imencode('.jpg', ref_annotated)[1].tobytes()).decode('utf-8')
