@@ -1,9 +1,9 @@
 // Configuration
 const API_URL = 'https://15zjlknmve.execute-api.us-east-1.amazonaws.com/Prod/';
 const API_ENDPOINTS = {
-    upload: API_URL + 'upload',
-    analyze: API_URL + 'analyze',
-    results: (analysisId) => `${API_URL}results/${analysisId}`
+    upload: `${API_URL}upload`,
+    analyze: `${API_URL}analyze`,
+    results: (analysisId) => `${API_URL}results/${encodeURIComponent(analysisId)}`
 };
 
 // Debug function to test API endpoints
@@ -212,8 +212,7 @@ async function handleFormSubmit(event) {
                 });
                 
                 console.log('Results response status:', resultsResponse.status);
-                
-                if (resultsResponse.ok) {
+                  if (resultsResponse.ok) {
                     let data;
                     try {
                         data = await resultsResponse.json();
@@ -230,9 +229,30 @@ async function handleFormSubmit(event) {
                         console.log('Results not ready yet, status:', data.status);
                     }
                 } else {
-                    console.warn('Results request failed:', resultsResponse.status);
+                    let errorText;
+                    try {
+                        errorText = await resultsResponse.text();
+                        console.error('Results request failed:', resultsResponse.status, errorText);
+                    } catch (e) {
+                        console.error('Results request failed:', resultsResponse.status, 'Could not read error response');
+                    }
+                    // If we get a 404, the analysis doesn't exist, so we should break
+                    if (resultsResponse.status === 404) {
+                        throw new Error('Analysis not found - please try uploading again');
+                    }
+                    // For 400 errors, check if it's a known error condition
+                    if (resultsResponse.status === 400 && errorText) {
+                        try {
+                            const errorData = JSON.parse(errorText);
+                            if (errorData.error) {
+                                throw new Error(errorData.error);
+                            }
+                        } catch (e) {
+                            // If we can't parse the error, just continue polling
+                            console.warn('Could not parse error response:', e);
+                        }
+                    }
                 }
-                
                 // Wait before trying again
                 await new Promise(resolve => setTimeout(resolve, 3000));
             } catch (e) {
