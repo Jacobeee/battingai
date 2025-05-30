@@ -372,17 +372,19 @@ function displayResults(results, playerId) {
         // Define swing phase names
         const phaseNames = ['Setup', 'Load', 'Swing', 'Contact', 'Follow-through'];
         
-        results.results.comparison_results.forEach((frame, index) => {
-            // Create a card for each frame
+        results.results.comparison_results.forEach((frame, index) => {            // Create a card for each frame
             const card = document.createElement('div');
             card.className = 'col';
             
-             // Get the frame URL from the results
-            const imageUrl = results.frame_urls && results.frame_urls.length > index ? 
-                results.frame_urls[index] : '';
-    
-            // Log the URL for debugging
-            console.log(`Frame ${index} URL:`, imageUrl);
+            // Get annotated frames from base64 data
+            const userAnnotatedUrl = frame.user_annotated ? 
+                `data:image/jpeg;base64,${frame.user_annotated}` : '';
+            const refAnnotatedUrl = frame.ref_annotated ? 
+                `data:image/jpeg;base64,${frame.ref_annotated}` : '';
+            
+            // Log the frames for debugging
+            console.log(`Frame ${index} user annotated:`, userAnnotatedUrl ? 'present' : 'missing');
+            console.log(`Frame ${index} ref annotated:`, refAnnotatedUrl ? 'present' : 'missing');
 
             // Determine the phase name based on index
             const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
@@ -408,9 +410,8 @@ function displayResults(results, playerId) {
                     <div class="row g-0">
                         <div class="col-6">
                             <div class="p-2">
-                                <h6 class="text-center mb-2">Your Swing</h6>
-                                ${imageUrl ? 
-                                    `<img src="${imageUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                <h6 class="text-center mb-2">Your Swing</h6>                                ${userAnnotatedUrl ? 
+                                    `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
                                     `<div class="text-center p-3 bg-light">
                                         <div class="swing-phase-icon">
                                             <i class="bi bi-camera-video"></i>
@@ -423,8 +424,8 @@ function displayResults(results, playerId) {
                         <div class="col-6">
                             <div class="p-2">
                                 <h6 class="text-center mb-2">Reference</h6>
-                                ${results.reference_urls && results.reference_urls.length > index ? 
-                                    `<img src="${results.reference_urls[index]}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                ${refAnnotatedUrl ? 
+                                    `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
                                     `<div class="text-center p-3 bg-light">
                                         <div class="swing-phase-icon">
                                             <i class="bi bi-camera-video"></i>

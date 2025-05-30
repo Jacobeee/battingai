@@ -5,7 +5,6 @@ import traceback
 import tempfile
 import cv2
 import numpy as np
-import base64  # Add base64 for encoding binary data
 
 s3_client = boto3.client('s3')
 bucket_name = os.environ.get('BUCKET_NAME', 'battingai-videobucket-ayk9m1uehbg2')
@@ -245,61 +244,45 @@ def detect_swing_phase(frames):
     print(f"Detected swing phases at frames: {phases}")
     return phases
 
-def extract_frames(video_path, num_frames=5):
-    """Extract key frames from a video file based on fixed percentages"""
-    print(f"Opening video file: {video_path}")
-    cap = cv2.VideoCapture(video_path)
-    
-    if not cap.isOpened():
-        print("Failed to open video file with OpenCV")
-        raise Exception(f"Could not open video file: {video_path}")
-    
-    # Get video properties
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    # Read all frames
-    all_frames = []
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        all_frames.append(cv2.resize(frame, (640, 360)))
-    cap.release()
-    
-    if len(all_frames) < 5:
-        print("Not enough frames, using regular interval sampling")
-        step = max(1, len(all_frames) // num_frames)
-        indices = [i * step for i in range(num_frames) if i * step < len(all_frames)]
-        while len(indices) < num_frames:
-            indices.append(len(all_frames) - 1)
-        return [all_frames[i] for i in indices[:num_frames]]
-    
-    print("Detecting swing phases using motion analysis...")
-    
-    # Use motion detection to find key swing phases
-    indices = detect_swing_phase(all_frames)
-    
-    # Ensure we have exactly 5 frames
-    if len(indices) > 5:
-        indices = indices[:5]
-    while len(indices) < 5:
-        # Find largest gap and add frame in middle
-        max_gap = 0
-        insert_idx = 0
-        for i in range(len(indices) - 1):
-            gap = indices[i + 1] - indices[i]
-            if gap > max_gap:
-                max_gap = gap
-                insert_idx = i
-        indices.insert(insert_idx + 1, indices[insert_idx] + (indices[insert_idx + 1] - indices[insert_idx]) // 2)
-    
-    # Sort indices to maintain temporal order
-    indices.sort()
-    key_frames = [all_frames[i] for i in indices]
-    
-    print(f"Selected frame indices: {indices}")
-    
-    return key_frames
+def extract_frames(video_path):
+    """Extract frames from video with proper error handling."""
+    frames = []
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise Exception("Failed to open video file")
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            raise Exception("Invalid frame count detected in video")
+            
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        print(f"Video FPS: {fps}, Total frames: {total_frames}")
+        
+        # Sample frames at a reasonable rate to stay within Lambda timeout
+        frame_interval = max(1, int(fps / 10))  # Capture up to 10 frames per second
+        
+        frame_count = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            if frame_count % frame_interval == 0:
+                frames.append(frame)
+                
+            frame_count += 1
+            
+        print(f"Extracted {len(frames)} frames from {frame_count} total frames")
+        
+    except Exception as e:
+        print(f"Error in frame extraction: {str(e)}")
+        raise
+    finally:
+        if 'cap' in locals():
+            cap.release()
+            
+    return frames
 
 
 
@@ -420,11 +403,7 @@ def compare_frames(user_frames, reference_frames):
     comparison_results = []
     
     for i, (user_frame, ref_frame) in enumerate(zip(user_frames, reference_frames)):
-        # Create copies for annotation
-        user_annotated = user_frame.copy()
-        ref_annotated = ref_frame.copy()
-        
-        # Normalize lighting and process frames
+        # Normalize lighting
         user_lab = cv2.cvtColor(user_frame, cv2.COLOR_BGR2LAB)
         ref_lab = cv2.cvtColor(ref_frame, cv2.COLOR_BGR2LAB)
         
@@ -432,266 +411,198 @@ def compare_frames(user_frames, reference_frames):
         user_l = cv2.normalize(user_lab[:,:,0], None, 0, 255, cv2.NORM_MINMAX)
         ref_l = cv2.normalize(ref_lab[:,:,0], None, 0, 255, cv2.NORM_MINMAX)
         
-        # Analyze bat position
-        user_bat = detect_bat_region(user_frame)
-        ref_bat = detect_bat_region(ref_frame)
+        # Reconstruct normalized images
+        user_lab[:,:,0] = user_l
+        ref_lab[:,:,0] = ref_l
+        user_norm = cv2.cvtColor(user_lab, cv2.COLOR_LAB2BGR)
+        ref_norm = cv2.cvtColor(ref_lab, cv2.COLOR_LAB2BGR)
         
-        # Draw bat position annotations
-        if user_bat:
-            cv2.rectangle(user_annotated, 
-                         (user_bat['x'], user_bat['y']), 
-                         (user_bat['x'] + user_bat['w'], user_bat['y'] + user_bat['h']), 
-                         (0, 255, 0), 2)
+        # Convert to grayscale for feature detection
+        user_gray = cv2.cvtColor(user_norm, cv2.COLOR_BGR2GRAY)
+        ref_gray = cv2.cvtColor(ref_norm, cv2.COLOR_BGR2GRAY)
+        
+        # Initialize feature detector with better parameters for baseball swings
+        orb = cv2.ORB_create(
+            nfeatures=1000,
+            scaleFactor=1.2,
+            nlevels=8,
+            edgeThreshold=31,
+            firstLevel=0,
+            WTA_K=2,
+            patchSize=31
+        )
+        
+        # Find keypoints and descriptors with mask to focus on central region
+        height, width = user_gray.shape
+        mask = np.zeros((height, width), dtype=np.uint8)
+        center_region = [(width//4, height//4), (3*width//4, 3*height//4)]
+        mask[center_region[0][1]:center_region[1][1], center_region[0][0]:center_region[1][0]] = 255
+        
+        user_kp, user_des = orb.detectAndCompute(user_gray, mask)
+        ref_kp, ref_des = orb.detectAndCompute(ref_gray, mask)
+        
+        # Match features and calculate similarity
+        similarity_score = 0
+        if user_des is not None and ref_des is not None and len(user_des) > 0 and len(ref_des) > 0:
+            # Use better feature matching
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+            matches = bf.match(user_des, ref_des)
             
-        if ref_bat:
-            cv2.rectangle(ref_annotated,
-                         (ref_bat['x'], ref_bat['y']),
-                         (ref_bat['x'] + ref_bat['w'], ref_bat['y'] + ref_bat['h']),
-                         (0, 255, 0), 2)
+            # Sort matches by distance
+            matches = sorted(matches, key=lambda x: x.distance)
+              # Use best 70% of matches for homography
+            good_matches = matches[:int(len(matches) * 0.7)]
+            
+            if len(good_matches) >= 4:
+                # Get matched keypoints
+                src_pts = np.float32([user_kp[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+                dst_pts = np.float32([ref_kp[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+                
+                # Find homography
+                H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+                
+                if H is not None:
+                    # Calculate similarity score based on good matches ratio and homography quality
+                    inliers = np.sum(mask)
+                    match_ratio = len(good_matches) / len(matches) if len(matches) > 0 else 0
+                    similarity_score = (0.6 * inliers / len(good_matches) + 0.4 * match_ratio) if len(good_matches) > 0 else 0
+                else:
+                    # Fallback to original distance-based scoring
+                    avg_distance = sum(m.distance for m in matches) / len(matches)
+                    similarity_score = max(0, min(1, 1 - (avg_distance / 100)))
+            else:
+                # Fallback to original distance-based scoring
+                avg_distance = sum(m.distance for m in matches) / len(matches)
+                similarity_score = max(0, min(1, 1 - (avg_distance / 100)))        # Calculate histogram similarity with all channels for better color matching
+        hist_similarity = 0
+        for channel in range(3):  # BGR channels
+            hist_user = cv2.calcHist([user_frame], [channel], None, [256], [0, 256])
+            cv2.normalize(hist_user, hist_user, 0, 1, cv2.NORM_MINMAX)
+            
+            hist_ref = cv2.calcHist([ref_frame], [channel], None, [256], [0, 256])
+            cv2.normalize(hist_ref, hist_ref, 0, 1, cv2.NORM_MINMAX)
+            
+            hist_similarity += cv2.compareHist(hist_user, hist_ref, cv2.HISTCMP_CORREL) / 3
 
-        # Calculate pose differences
-        pose_difference = cv2.absdiff(user_l, ref_l)
-        significant_diff = cv2.threshold(pose_difference, 50, 255, cv2.THRESH_BINARY)[1]
+        # Calculate edge similarity with adaptive thresholds
+        edges_threshold = int(np.mean(user_gray) * 0.5)
+        user_edges = cv2.Canny(user_gray, 100, 200)
+        ref_edges = cv2.Canny(ref_gray, 100, 200)
         
-        # Overlay pose differences
-        pose_overlay = cv2.cvtColor(significant_diff, cv2.COLOR_GRAY2BGR)
-        pose_overlay[..., 0] = 0  # Set blue channel to 0
-        pose_overlay[..., 2] = 0  # Set red channel to 0
+        user_edge_count = np.count_nonzero(user_edges)
+        ref_edge_count = np.count_nonzero(ref_edges)
         
-        # Add overlay to annotated images with 50% transparency
-        cv2.addWeighted(user_annotated, 0.7, pose_overlay, 0.3, 0, user_annotated)
+        edge_ratio = min(user_edge_count, ref_edge_count) / max(user_edge_count, ref_edge_count) if max(user_edge_count, ref_edge_count) > 0 else 0
         
-        # Calculate similarity score
-        similarity_score = 1.0 - (np.sum(pose_difference) / (pose_difference.shape[0] * pose_difference.shape[1] * 255))
+        # Combine similarity metrics
+        combined_score = (similarity_score * 0.4) + (hist_similarity * 0.3) + (edge_ratio * 0.3)
         
-        # Generate annotations
-        annotations = []
+        # Identify issues
+        issues = []
         
-        # Add pose difference annotations
-        if np.sum(significant_diff) > 0:
-            annotations.append({
-                'type': 'pose_difference',
-                'magnitude': float(np.sum(significant_diff)) / (significant_diff.shape[0] * significant_diff.shape[1]),
-                'description': 'Significant pose difference detected'
+        if similarity_score < 0.5:
+            issues.append({
+                "type": "pose",
+                "description": "Your body position differs from the reference"
             })
         
-        # Add bat position annotations
-        if user_bat and ref_bat:
-            bat_x_diff = abs(user_bat['x'] - ref_bat['x'])
-            bat_y_diff = abs(user_bat['y'] - ref_bat['y'])
-            if bat_x_diff > 20 or bat_y_diff > 20:
-                annotations.append({
-                    'type': 'bat_position',
-                    'magnitude': float(bat_x_diff + bat_y_diff) / (user_frame.shape[1] + user_frame.shape[0]),
-                    'region': {'x': user_bat['x'], 'y': user_bat['y'], 'w': user_bat['w'], 'h': user_bat['h']},
-                    'description': 'Bat position differs from reference'
-                })
-        
-        # Generate drills based on identified issues
-        drills = []
-        if similarity_score < 0.6:
-            drills.append({
-                'type': 'form',
-                'name': 'Mirror Practice',
-                'description': 'Practice your swing in front of a mirror, focusing on matching the reference pose',
-                'steps': [
-                    'Set up in front of a full-length mirror',
-                    'Take your stance and compare to the reference image',
-                    'Practice the swing in slow motion, checking your form at each phase',
-                    'Focus on matching the key positions shown in the reference'
-                ]
+        if hist_similarity < 0.5:
+            issues.append({
+                "type": "timing",
+                "description": "Your swing timing could be improved"
             })
         
-        if any(a['type'] == 'bat_position' for a in annotations):
-            drills.append({
-                'type': 'bat_control',
-                'name': 'Bat Path Drill',
-                'description': 'Practice maintaining proper bat path and position through the swing',
-                'steps': [
-                    'Set up with a tee at proper contact height',
-                    'Place visual markers at key positions (setup, load, contact)',
-                    'Focus on keeping the bat on the proper path through these positions',
-                    'Practice with slow, controlled movements initially'
-                ]
+        if edge_ratio < 0.5:
+            issues.append({
+                "type": "form",
+                "description": "Your swing form needs adjustment"
             })
         
         comparison_results.append({
-            'frame_index': i,            'similarity_score': float(similarity_score),
-            'annotations': annotations,
-            'drills': drills,
-            'user_annotated': base64.b64encode(cv2.imencode('.jpg', user_annotated)[1].tobytes()).decode('utf-8'),
-            'ref_annotated': base64.b64encode(cv2.imencode('.jpg', ref_annotated)[1].tobytes()).decode('utf-8')
+            "frame_index": i,
+            "similarity_score": combined_score,
+            "issues": issues
         })
     
     return comparison_results
 
 def analyze_swing(user_frames, reference_frames, comparison_results):
-    """Generate comprehensive swing analysis with specific drills and exercises"""
+    """Generate comprehensive swing analysis"""
     if not comparison_results:
         return {
             "overall_score": 50,
             "strengths": ["Consistent swing pattern"],
             "areas_to_improve": ["Work on matching professional form"],
-            "detailed_feedback": "We couldn't perform a detailed comparison with the reference player. Try uploading a clearer video.",
-            "drills": [{
-                "name": "Basic Mirror Work",
-                "description": "Practice your swing in front of a mirror to develop muscle memory",
-                "steps": [
-                    "Set up in front of a full-length mirror",
-                    "Take your stance and check your alignment",
-                    "Practice your swing in slow motion",
-                    "Focus on fluid movement and balance"
-                ]
-            }]
+            "detailed_feedback": "We couldn't perform a detailed comparison with the reference player. Try uploading a clearer video."
         }
     
     # Calculate overall score
     overall_score = int(sum(result["similarity_score"] for result in comparison_results) / len(comparison_results) * 100)
     
-    # Analyze annotations across all frames
-    all_annotations = [ann for result in comparison_results for ann in result["annotations"]]
-    
-    # Group issues by type
+    # Identify common issues
+    all_issues = [issue for result in comparison_results for issue in result["issues"]]
     issue_types = {}
-    for annotation in all_annotations:
-        if annotation["type"] not in issue_types:
-            issue_types[annotation["type"]] = []
-        issue_types[annotation["type"]].append(annotation)
+    for issue in all_issues:
+        if issue["type"] not in issue_types:
+            issue_types[issue["type"]] = 0
+        issue_types[issue["type"]] += 1
     
-    # Collect all recommended drills
-    all_drills = [drill for result in comparison_results for drill in result["drills"]]
-    unique_drills = []
-    drill_names = set()
-    
-    for drill in all_drills:
-        if drill["name"] not in drill_names:
-            drill_names.add(drill["name"])
-            unique_drills.append({
-                "name": drill["name"],
-                "description": drill["description"],
-                "steps": drill["steps"]
-            })
-    
-    # Determine strengths and areas to improve with specific feedback
+    # Determine strengths and areas to improve
     strengths = []
     areas_to_improve = []
     
-    # Add strengths based on high similarity scores and good form
+    # Add strengths based on high similarity scores
     high_scores = [r for r in comparison_results if r["similarity_score"] > 0.7]
     if len(high_scores) > len(comparison_results) / 2:
-        strengths.append({
-            "text": "Good overall form matching the professional reference",
-            "details": "Your stance and movement pattern closely matches the reference"
-        })
+        strengths.append("Good overall form matching the professional reference")
     
     if len(high_scores) > 0:
         best_frame = max(comparison_results, key=lambda x: x["similarity_score"])
         if best_frame["frame_index"] == 0:
-            strengths.append({
-                "text": "Excellent setup position",
-                "details": "Your initial stance demonstrates proper balance and readiness"
-            })
+            strengths.append("Excellent stance preparation")
         elif best_frame["frame_index"] == len(comparison_results) - 1:
-            strengths.append({
-                "text": "Strong follow-through",
-                "details": "You complete your swing with good extension and balance"
-            })
+            strengths.append("Strong follow-through")
+        else:
+            strengths.append("Good swing execution")
     
-    # Analyze pose differences
-    pose_issues = issue_types.get("pose_difference", [])
-    if pose_issues:
-        avg_difference = sum(issue["magnitude"] for issue in pose_issues) / len(pose_issues)
-        if avg_difference > 0.3:
-            areas_to_improve.append({
-                "text": "Work on your body positioning throughout the swing",
-                "details": "Focus on maintaining proper posture and alignment",
-                "drill": {
-                    "name": "Posture Alignment Drill",
-                    "description": "Improve your swing posture and body alignment",
-                    "steps": [
-                        "Set up in front of a mirror",
-                        "Place alignment rods on the ground",
-                        "Practice maintaining proper spine angle",
-                        "Check alignment at key positions: setup, load, contact"
-                    ]
-                }
-            })
+    # Add areas to improve based on issues
+    if "pose" in issue_types and issue_types["pose"] > len(comparison_results) / 3:
+        areas_to_improve.append("Work on your body positioning throughout the swing")
     
-    # Analyze bat path
-    bat_position_issues = issue_types.get("bat_position", [])
-    if bat_position_issues:
-        avg_magnitude = sum(issue["magnitude"] for issue in bat_position_issues) / len(bat_position_issues)
-        if avg_magnitude > 0.2:
-            areas_to_improve.append({
-                "text": "Improve your bat path consistency",
-                "details": "Work on maintaining a level swing plane",
-                "drill": {
-                    "name": "Level Swing Path Drill",
-                    "description": "Develop a more consistent and level bat path",
-                    "steps": [
-                        "Set up with a tee at belt height",
-                        "Place visual markers at contact point",
-                        "Focus on keeping the bat level through the zone",
-                        "Practice with slow, controlled movements"
-                    ]
-                }
-            })
+    if "timing" in issue_types and issue_types["timing"] > len(comparison_results) / 3:
+        areas_to_improve.append("Improve your swing timing and rhythm")
     
-    # Add timing drill if needed
-    if overall_score < 70:
-        unique_drills.append({
-            "name": "Timing Refinement Drill",
-            "description": "Improve your swing timing and rhythm",
-            "steps": [
-                "Use a tee or soft toss",
-                "Practice with a metronome",
-                "Focus on smooth load and trigger movements",
-                "Gradually increase speed while maintaining form"
-            ]
-        })
+    if "form" in issue_types and issue_types["form"] > len(comparison_results) / 3:
+        areas_to_improve.append("Focus on matching the professional swing form")
     
-    # Ensure we have at least one strength
+    # Ensure we have at least one strength and area to improve
     if not strengths:
         if overall_score > 60:
-            strengths.append({
-                "text": "Consistent swing mechanics",
-                "details": "You maintain good rhythm through your swing"
-            })
+            strengths.append("Consistent swing mechanics")
         else:
-            strengths.append({
-                "text": "Good effort and swing attempt",
-                "details": "You're showing commitment to improving your technique"
-            })
+            strengths.append("Good effort and swing attempt")
+    
+    if not areas_to_improve:
+        if overall_score < 80:
+            areas_to_improve.append("Continue practicing to match professional form")
+        else:
+            areas_to_improve.append("Fine-tune your follow-through for even better results")
     
     # Generate detailed feedback
     score_text = "excellent" if overall_score > 80 else "good" if overall_score > 60 else "developing"
-    detailed_feedback = f"Your swing shows {score_text} potential with a similarity score of {overall_score}/100. "
+    detailed_feedback = f"Your swing shows {score_text} potential with a similarity score of {overall_score}/100 compared to the reference player. "
     
-    if strengths:
-        detailed_feedback += f"\n\nKey Strengths:\n"
-        for strength in strengths:
-            detailed_feedback += f"- {strength['text']}: {strength['details']}\n"
+    if len(strengths) > 0:
+        detailed_feedback += f"Your key strength is {strengths[0].lower()}. "
     
-    if areas_to_improve:
-        detailed_feedback += f"\n\nAreas to Focus On:\n"
-        for area in areas_to_improve:
-            detailed_feedback += f"- {area['text']}: {area['details']}\n"
-    
-    # Add drill recommendations
-    if unique_drills:
-        detailed_feedback += "\n\nRecommended Drills:\n"
-        for drill in unique_drills:
-            detailed_feedback += f"- {drill['name']}: {drill['description']}\n"
-            detailed_feedback += "  Steps:\n"
-            for step in drill['steps']:
-                detailed_feedback += f"    * {step}\n"
+    if len(areas_to_improve) > 0:
+        detailed_feedback += f"To improve, focus on {areas_to_improve[0].lower()}."
     
     return {
         "overall_score": overall_score,
-        "strengths": [s["text"] for s in strengths],
-        "areas_to_improve": [a["text"] for a in areas_to_improve],
+        "strengths": strengths,
+        "areas_to_improve": areas_to_improve,
         "detailed_feedback": detailed_feedback,
-        "drills": unique_drills,
         "comparison_results": comparison_results
     }
 
@@ -946,13 +857,13 @@ def lambda_handler(event, context):
             }
         
         print(f"Using video key: {video_key} for analysis: {analysis_id}")
-        
-        # Create initial metadata to indicate processing
+          # Create initial metadata to indicate processing
         metadata = {
             "analysis_id": analysis_id,
             "video_key": video_key,
             "status": "processing",
-            "player_id": player_id
+            "player_id": player_id,
+            "player_name": player_name
         }
         
         s3_client.put_object(
@@ -967,19 +878,37 @@ def lambda_handler(event, context):
             temp_path = temp_video.name
             
             try:
+                print(f"Downloading video from S3: {video_key}")
                 s3_client.download_file(bucket_name, video_key, temp_path)
-                print(f"Successfully downloaded video to {temp_path}")
                 
-                # Extract frames
+                # Extract frames from video
+                print("Extracting frames from video...")
                 frames = extract_frames(temp_path)
+                
+                if not frames or len(frames) == 0:
+                    raise Exception("Failed to extract frames from video")
+                    
+            except Exception as e:
+                print(f"Error processing video: {str(e)}")
+                metadata.update({
+                    "status": "failed",
+                    "error": f"Failed to process video: {str(e)}"
+                })
+                # Update metadata with error
+                s3_client.put_object(
+                    Bucket=bucket_name,
+                    Key=f"analyses/{analysis_id}/metadata.json",
+                    Body=json.dumps(metadata),
+                    ContentType='application/json'
+                )
+                raise
             finally:
-                # Clean up the temp file
+                # Clean up temporary file
                 try:
                     os.unlink(temp_path)
-                    print(f"Cleaned up temporary file: {temp_path}")
                 except Exception as e:
-                    print(f"Error cleaning up temp file: {str(e)}")
-        
+                    print(f"Warning: Failed to cleanup temp file {temp_path}: {str(e)}")
+
         # Save frames to S3
         frame_paths, frame_urls = save_frames_to_s3(frames, analysis_id)
         
@@ -988,47 +917,55 @@ def lambda_handler(event, context):
         
         # Compare user frames with reference frames
         comparison_results = compare_frames(frames, reference_frames)
-        
-        # Generate comprehensive analysis
+          # Generate comprehensive analysis and update metadata
         if comparison_results:
             analysis_results = analyze_swing(frames, reference_frames, comparison_results)
+            metadata.update({
+                "status": "completed",
+                "comparison_results": comparison_results,
+                "analysis_results": analysis_results,
+                "frame_paths": frame_paths,
+                "frame_urls": frame_urls,
+                "reference_urls": reference_urls,
+                "feedback": (
+                    f"Based on your {analysis_results['overall_score']}/100 score comparing to {player_name}:\n\n"
+                    f"Strengths:\n- " + "\n- ".join(analysis_results['strengths']) + "\n\n"
+                    f"Areas to Improve:\n- " + "\n- ".join(analysis_results['areas_to_improve']) + "\n\n"
+                    f"{analysis_results['detailed_feedback']}"
+                )
+            })
             
-            # Create feedback based on the analysis
-            feedback = {
-                "status": "feedback_generated",
-                "player_id": player_id,
-                "player_name": player_name,  # Use the mapped player name
-                "overall_score": analysis_results["overall_score"],
-                "strengths": analysis_results["strengths"],
-                "areas_to_improve": analysis_results["areas_to_improve"],
-                "detailed_feedback": analysis_results["detailed_feedback"],
-                "comparison_results": analysis_results["comparison_results"]
+            # Return successful response immediately
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=f"analyses/{analysis_id}/metadata.json",
+                Body=json.dumps(metadata),
+                ContentType='application/json'
+            )
+            
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps(metadata)
             }
         else:
-            # Fallback to basic analysis if no reference frames or comparison failed
-            print("No comparison results available, using basic analysis")
-            feedback = {
-                "status": "feedback_generated",
-                "player_id": player_id,
-                "player_name": player_name,  # Use the mapped player name
-                "overall_score": 65,
-                "strengths": ["Consistent swing pattern", "Good effort"],
-                "areas_to_improve": ["Work on matching professional form", "Practice your timing"],
-                "detailed_feedback": f"We analyzed your swing but couldn't compare it to {player_name}. Keep practicing your technique!"
-            }
-        
-        # Update metadata
-        metadata = {
-            "analysis_id": analysis_id,
-            "video_key": video_key,
-            "status": "feedback_generated",
-            "player_id": player_id,
-            "frame_paths": frame_paths,
-            "frame_urls": frame_urls,
-            "reference_urls": reference_urls,
-            "results": feedback
-        }
-        
+            # Handle case where comparison failed
+            metadata.update({
+                "status": "completed",
+                "error": "Unable to perform detailed comparison",
+                "frame_paths": frame_paths,
+                "frame_urls": frame_urls,
+                "reference_urls": reference_urls,
+                "feedback": (
+                    f"We've analyzed your swing but couldn't perform a detailed comparison with {player_name}. "
+                    "This could be due to lighting conditions, video quality, or camera angle. "
+                    "For best results, try recording:\n"
+                    "- In good lighting conditions\n"
+                    "- With a stable camera\n"
+                    "- From a side view\n"
+                    "- With the full swing motion visible"
+                )
+            })        # Save metadata and return response for failed comparison case
         s3_client.put_object(
             Bucket=bucket_name,
             Key=f"analyses/{analysis_id}/metadata.json",
@@ -1036,35 +973,35 @@ def lambda_handler(event, context):
             ContentType='application/json'
         )
         
-        print(f"Successfully updated metadata for {analysis_id}")
-        
         return {
             'statusCode': 200,
             'headers': headers,
-            'body': json.dumps({
-                'analysis_id': analysis_id,
-                'status': 'feedback_generated'
-            })
+            'body': json.dumps(metadata)
         }
         
     except Exception as e:
         print(f"Error: {str(e)}")
         print(traceback.format_exc())
-        
-        # Update metadata with error status
+          # Update metadata with error status
         if analysis_id and video_key:
             try:
-                error_metadata = {
-                    "analysis_id": analysis_id,
-                    "video_key": video_key,
+                metadata.update({
                     "status": "error",
-                    "error": str(e)
-                }
+                    "error": str(e),
+                    "feedback": (
+                        "We encountered an error while analyzing your swing. "
+                        "This could be due to:\n"
+                        "- Video format or quality issues\n"
+                        "- Processing limitations\n"
+                        "- System errors\n\n"
+                        "Please try uploading your video again or contact support if the issue persists."
+                    )
+                })
                 
                 s3_client.put_object(
                     Bucket=bucket_name,
                     Key=f"analyses/{analysis_id}/metadata.json",
-                    Body=json.dumps(error_metadata),
+                    Body=json.dumps(metadata),
                     ContentType='application/json'
                 )
                 
@@ -1079,50 +1016,3 @@ def lambda_handler(event, context):
                 'error': str(e)
             })
         }
-
-def detect_bat_region(frame):
-    """Detect the bat region in a frame using edge detection and shape analysis"""
-    # Convert to grayscale
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    
-    # Apply Gaussian blur to reduce noise
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    
-    # Detect edges
-    edges = cv2.Canny(blurred, 50, 150)
-    
-    # Find contours
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Filter contours by size and shape
-    bat_region = None
-    max_score = 0
-    
-    for contour in contours:
-        # Get bounding rectangle
-        x, y, w, h = cv2.boundingRect(contour)
-        
-        # Calculate aspect ratio and area
-        aspect_ratio = float(w) / h if h > 0 else 0
-        area = cv2.contourArea(contour)
-        rect_area = w * h
-        
-        # Score the contour based on bat-like properties
-        # Bats typically have:
-        # 1. High aspect ratio (long and thin)
-        # 2. Reasonable size relative to frame
-        # 3. Relatively straight edges
-        frame_area = frame.shape[0] * frame.shape[1]
-        size_score = area / frame_area
-        shape_score = cv2.arcLength(contour, True) ** 2 / (4 * np.pi * area) if area > 0 else 0
-        
-        if (2.5 < aspect_ratio < 8.0 and  # Typical bat proportions
-            0.01 < size_score < 0.2 and    # Reasonable size
-            shape_score > 2):              # Long, straight shape
-            
-            score = size_score * shape_score
-            if score > max_score:
-                max_score = score
-                bat_region = {'x': x, 'y': y, 'w': w, 'h': h}
-    
-    return bat_region
