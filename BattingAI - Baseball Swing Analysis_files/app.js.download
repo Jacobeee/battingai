@@ -425,6 +425,29 @@ async function handleFormSubmit(event) {
 // S3 bucket name for accessing frame images
 const bucket_name = 'battingai-videobucket-ayk9m1uehbg2';
 
+// Helper function to get feedback based on similarity score
+function getFeedbackForScore(score) {
+    if (score >= 0.9) {
+        return {
+            text: 'Perfect!',
+            class: 'text-success',
+            icon: 'bi-check-circle-fill'
+        };
+    } else if (score >= 0.7) {
+        return {
+            text: 'Good, but needs improvement',
+            class: 'text-warning',
+            icon: 'bi-exclamation-circle-fill'
+        };
+    } else {
+        return {
+            text: 'Issues need attention',
+            class: 'text-danger',
+            icon: 'bi-x-circle-fill'
+        };
+    }
+}
+
 // Function to display analysis results
 function displayResults(results, playerId) {
     console.log("Displaying results:", results);
@@ -593,6 +616,9 @@ function displayResults(results, playerId) {
                 );
             });
 
+            // Get feedback for the similarity score
+            const feedback = getFeedbackForScore(frame.similarity_score);
+            
             // Set the card's inner HTML
             cardContent.innerHTML = `
                 <div class="card-header bg-primary text-white">
@@ -631,12 +657,13 @@ function displayResults(results, playerId) {
                 <div class="card-body">
                     <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
                     <div class="progress mb-3">
-                        <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
+                        <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-danger' : (frame.similarity_score < 0.9 ? 'bg-warning' : 'bg-success')}" role="progressbar" 
                             style="width: ${Math.round(frame.similarity_score * 100)}%" 
                             aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
                     </div>
-                    <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
-                        ${frame.issues && frame.issues.length > 0 ? 'Issues Detected:' : 'Perfect!'}
+                    <h6 class="card-subtitle mb-2 ${feedback.class}">
+                        <i class="bi ${feedback.icon} me-1"></i>
+                        ${feedback.text}
                     </h6>
                     ${issuesHtml}
                 </div>
@@ -730,6 +757,8 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
         existingModal.remove();
     }
 
+    const feedback = getFeedbackForScore(similarityScore / 100); // Convert percentage to decimal
+
     // Create new modal container
     const modalContainer = document.createElement('div');
     modalContainer.id = 'frameDetailModal';
@@ -774,9 +803,12 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
                         </div>
                         <div class="row mt-4">
                             <div class="col-12">
-                                <h5>Similarity Score: ${similarityScore}%</h5>
+                                <div class="d-flex align-items-center mb-2">
+                                    <h5 class="mb-0 me-2">Similarity Score: ${similarityScore}%</h5>
+                                    <i class="bi ${feedback.icon} ${feedback.class}" style="font-size: 1.2rem;"></i>
+                                </div>
                                 <div class="progress mb-3" style="height: 20px;">
-                                    <div class="progress-bar ${similarityScore < 70 ? 'bg-warning' : ''}" 
+                                    <div class="progress-bar ${similarityScore < 70 ? 'bg-danger' : (similarityScore < 90 ? 'bg-warning' : 'bg-success')}" 
                                          role="progressbar" 
                                          style="width: ${similarityScore}%" 
                                          aria-valuenow="${similarityScore}" 
@@ -784,6 +816,10 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
                                          aria-valuemax="100">
                                     </div>
                                 </div>
+                                <h6 class="${feedback.class}">
+                                    <i class="bi ${feedback.icon} me-1"></i>
+                                    ${feedback.text}
+                                </h6>
                                 <div class="issues-section mt-4">
                                     <h5>Analysis</h5>
                                     ${issuesHtml}

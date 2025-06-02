@@ -426,24 +426,39 @@ async function handleFormSubmit(event) {
 const bucket_name = 'battingai-videobucket-ayk9m1uehbg2';
 
 // Helper function to get feedback based on similarity score
-function getFeedbackForScore(score) {
+function getFeedbackForScore(score, issues) {
     if (score >= 0.9) {
         return {
             text: 'Perfect!',
             class: 'text-success',
-            icon: 'bi-check-circle-fill'
+            icon: 'bi-check-circle-fill',
+            details: 'Your form closely matches the reference in this frame.'
         };
     } else if (score >= 0.7) {
+        // Create a more detailed feedback message based on the score range
+        let details = '';
+        if (issues && issues.length > 0) {
+            details = 'Focus on fixing: ' + issues.map(issue => issue.description).join(', ').toLowerCase();
+        } else {
+            // If no specific issues are detected, provide general feedback based on score
+            if (score >= 0.8) {
+                details = 'Minor adjustments needed - pay attention to your body positioning and timing.';
+            } else {
+                details = 'Several aspects need work - focus on matching the reference pose more closely.';
+            }
+        }
         return {
             text: 'Good, but needs improvement',
             class: 'text-warning',
-            icon: 'bi-exclamation-circle-fill'
+            icon: 'bi-exclamation-circle-fill',
+            details: details
         };
     } else {
         return {
             text: 'Issues need attention',
             class: 'text-danger',
-            icon: 'bi-x-circle-fill'
+            icon: 'bi-x-circle-fill',
+            details: 'Significant differences from reference form. Review the issues listed below.'
         };
     }
 }
@@ -617,7 +632,7 @@ function displayResults(results, playerId) {
             });
 
             // Get feedback for the similarity score
-            const feedback = getFeedbackForScore(frame.similarity_score);
+            const feedback = getFeedbackForScore(frame.similarity_score, frame.issues);
             
             // Set the card's inner HTML
             cardContent.innerHTML = `
@@ -665,6 +680,7 @@ function displayResults(results, playerId) {
                         <i class="bi ${feedback.icon} me-1"></i>
                         ${feedback.text}
                     </h6>
+                    <p class="card-text small ${feedback.class} mb-3">${feedback.details}</p>
                     ${issuesHtml}
                 </div>
             `;
@@ -757,7 +773,14 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
         existingModal.remove();
     }
 
-    const feedback = getFeedbackForScore(similarityScore / 100); // Convert percentage to decimal
+    // Parse the issuesHtml to extract issues array
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = issuesHtml;
+    const issues = Array.from(tempDiv.querySelectorAll('li')).map(li => ({
+        description: li.textContent
+    }));
+
+    const feedback = getFeedbackForScore(similarityScore / 100, issues); // Convert percentage to decimal
 
     // Create new modal container
     const modalContainer = document.createElement('div');
@@ -765,7 +788,7 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
     modalContainer.className = 'modal fade';
     modalContainer.setAttribute('tabindex', '-1');
 
-    // Set modal content
+    // Set modal content with a cleaner background for feedback section
     modalContainer.innerHTML = `
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
@@ -781,10 +804,7 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
                                 <div class="text-center">
                                     ${userAnnotatedUrl ? 
                                         `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frameIndex + 1}" style="max-height: 70vh; object-fit: contain;">` : 
-                                        `<div class="p-3 bg-light">
-                                            <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
-                                            <p class="mt-2">Frame not available</p>
-                                        </div>`
+                                        '<div class="p-3 bg-light"><i class="bi bi-camera-video" style="font-size: 3rem;"></i><p class="mt-2">Frame not available</p></div>'
                                     }
                                 </div>
                             </div>
@@ -793,10 +813,7 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
                                 <div class="text-center">
                                     ${refAnnotatedUrl ? 
                                         `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frameIndex + 1}" style="max-height: 70vh; object-fit: contain;">` : 
-                                        `<div class="p-3 bg-light">
-                                            <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
-                                            <p class="mt-2">Frame not available</p>
-                                        </div>`
+                                        '<div class="p-3 bg-light"><i class="bi bi-camera-video" style="font-size: 3rem;"></i><p class="mt-2">Frame not available</p></div>'
                                     }
                                 </div>
                             </div>
@@ -816,12 +833,15 @@ function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUr
                                          aria-valuemax="100">
                                     </div>
                                 </div>
-                                <h6 class="${feedback.class}">
-                                    <i class="bi ${feedback.icon} me-1"></i>
-                                    ${feedback.text}
-                                </h6>
+                                <div class="${feedback.class} p-3 rounded mb-4" style="background-color: ${feedback.class === 'text-success' ? 'rgba(40, 167, 69, 0.1)' : (feedback.class === 'text-warning' ? 'rgba(255, 193, 7, 0.1)' : 'rgba(220, 53, 69, 0.1)')}">
+                                    <h6 class="mb-2">
+                                        <i class="bi ${feedback.icon} me-1"></i>
+                                        ${feedback.text}
+                                    </h6>
+                                    <p class="mb-0">${feedback.details}</p>
+                                </div>
                                 <div class="issues-section mt-4">
-                                    <h5>Analysis</h5>
+                                    <h5>Analysis Details</h5>
                                     ${issuesHtml}
                                 </div>
                             </div>
