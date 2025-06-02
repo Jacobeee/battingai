@@ -483,6 +483,46 @@ def compare_frames(user_frames, reference_frames):
         ref_edge_count = np.count_nonzero(ref_edges)
         edge_ratio = min(user_edge_count, ref_edge_count) / max(user_edge_count, ref_edge_count) if max(user_edge_count, ref_edge_count) > 0 else 0
         
+        # Analyze stance width and height
+        user_stance = detect_batter_position(user_frame)
+        ref_stance = detect_batter_position(ref_frame)
+        
+        if user_stance and ref_stance:
+            # Compare stance dimensions
+            user_width = user_stance[2]  # width
+            user_height = user_stance[3]  # height
+            ref_width = ref_stance[2]
+            ref_height = ref_stance[3]
+            
+            # Calculate ratios relative to frame size
+            user_width_ratio = user_width / user_frame.shape[1]
+            user_height_ratio = user_height / user_frame.shape[0]
+            ref_width_ratio = ref_width / ref_frame.shape[1]
+            ref_height_ratio = ref_height / ref_frame.shape[0]
+            
+            # Compare stance dimensions
+            width_diff = (user_width_ratio - ref_width_ratio) / ref_width_ratio
+            height_diff = (user_height_ratio - ref_height_ratio) / ref_height_ratio
+            
+            # Add stance-specific annotations
+            if abs(width_diff) > 0.15:  # More than 15% difference
+                desc = "too wide" if width_diff > 0 else "too narrow"
+                annotations.append({
+                    'type': 'stance_width',
+                    'magnitude': abs(width_diff),
+                    'description': f'Batting stance is {desc}',
+                    'details': f'Your stance is {abs(width_diff)*100:.0f}% {desc} compared to the reference'
+                })
+            
+            if abs(height_diff) > 0.15:  # More than 15% difference
+                desc = "too upright" if height_diff < 0 else "too crouched"
+                annotations.append({
+                    'type': 'stance_height',
+                    'magnitude': abs(height_diff),
+                    'description': f'Batting stance is {desc}',
+                    'details': f'Your stance is {abs(height_diff)*100:.0f}% {desc} compared to the reference'
+                })
+        
         # Calculate basic stance similarity
         stance_diff = abs(user_edge_count - ref_edge_count) / max(user_edge_count, ref_edge_count)
         stance_similarity = 1.0 - stance_diff  # Keep as decimal between 0 and 1        # Calculate histogram similarity using center ROI only

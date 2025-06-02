@@ -545,15 +545,40 @@ function displayResults(results, playerId) {
             
             // Create issues list HTML
             let issuesHtml = '';
-            if (frame.issues && frame.issues.length > 0) {
+            const stanceIssues = frame.annotations.filter(a => a.type.startsWith('stance_'));
+            const otherIssues = frame.issues.filter(issue => !issue.type || !issue.type.startsWith('stance_'));
+            
+            if (stanceIssues.length > 0 || frame.issues.length > 0) {
                 issuesHtml = '<ul class="list-group list-group-flush">';
+                
+                // Add stance-specific feedback first
+                stanceIssues.forEach(stance => {
+                    issuesHtml += `
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong>${stance.description}</strong>
+                                    <div class="text-muted small">${stance.details}</div>
+                                </div>
+                                <span class="badge bg-warning">${(stance.magnitude * 100).toFixed(0)}% diff</span>
+                            </div>
+                        </li>`;
+                });
+                
+                // Add other issues
                 frame.issues.forEach(issue => {
                     issuesHtml += `<li class="list-group-item">${issue.description}</li>`;
                 });
+                
                 issuesHtml += '</ul>';
             } else {
                 issuesHtml = '<p class="card-text text-success">Perfect form!</p>';
-            }            // Create the card content
+            }
+            
+            // Escape the issues HTML for the onclick handler
+            const escapedIssuesHtml = issuesHtml.replace(/`/g, '\\`').replace(/'/g, "\\'").replace(/"/g, '\\"');
+            
+            // Create the card content
             const cardContent = document.createElement('div');
             cardContent.className = 'card h-100';
             cardContent.style.cursor = 'pointer';
@@ -564,7 +589,7 @@ function displayResults(results, playerId) {
                     phaseName,
                     userAnnotatedUrl,
                     refAnnotatedUrl,
-                    issuesHtml
+                    escapedIssuesHtml
                 );
             });
 
