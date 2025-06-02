@@ -53,22 +53,159 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('BattingAI app initialized');
     console.log('API URL:', API_URL);
     
-    // Run API tests
-    testApiEndpoints();
-    
-    // Add debug button
-    const debugButton = document.createElement('button');
-    debugButton.textContent = 'Debug API Connection';
-    debugButton.className = 'btn btn-secondary';
-    debugButton.style.marginLeft = '10px';
-    debugButton.addEventListener('click', function(e) {
+    // Add help button and modal for upload specifications
+    const helpButton = document.createElement('button');
+    helpButton.textContent = 'What should I upload?';
+    helpButton.className = 'btn btn-info';
+    helpButton.style.marginLeft = '10px';
+    helpButton.addEventListener('click', function(e) {
         e.preventDefault();
-        testApiEndpoints();
+        showUploadSpecsModal();
     });
-    
+
+    // Create modal container
+    const modal = document.createElement('div');
+    modal.id = 'uploadSpecsModal';
+    modal.className = 'modal fade';
+    modal.innerHTML = `
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Video Upload Requirements</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <h6>For best results, please ensure your video meets these requirements:</h6>
+                    <ul>
+                        <li><strong>Full Body View:</strong> The entire batter must be visible in all frames, from head to feet</li>
+                        <li><strong>Camera Position:</strong> Record from a side view, perpendicular to the batter's stance</li>
+                        <li><strong>Framing:</strong> Keep the batter centered in the frame</li>
+                        <li><strong>Background:</strong> A clean, uncluttered background helps with analysis</li>
+                        <li><strong>Lighting:</strong> Good, consistent lighting throughout the swing</li>
+                    </ul>
+                    <div class="alert alert-info">
+                        <strong>Tip:</strong> Position the camera at about waist height, 10-15 feet away from the batter
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Create frame detail modal container
+    const frameDetailModal = document.createElement('div');
+    frameDetailModal.id = 'frameDetailModal';
+    frameDetailModal.className = 'modal fade';
+    frameDetailModal.innerHTML = `
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container-fluid">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h4 class="text-center mb-3">Your Swing</h4>
+                                <img class="img-fluid user-frame mb-3" alt="Your Frame">
+                            </div>
+                            <div class="col-md-6">
+                                <h4 class="text-center mb-3">Reference</h4>
+                                <img class="img-fluid reference-frame mb-3" alt="Reference Frame">
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <h5 class="similarity-score"></h5>
+                                <div class="progress mb-3">
+                                    <div class="progress-bar" role="progressbar"></div>
+                                </div>
+                                <div class="issues-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(frameDetailModal);
+
     const submitButton = document.querySelector('button[type="submit"]');
-    submitButton.parentNode.insertBefore(debugButton, submitButton.nextSibling);
+    submitButton.parentNode.insertBefore(helpButton, submitButton.nextSibling);
 });
+
+// Function to show upload specifications modal
+function showUploadSpecsModal() {
+    const modal = new bootstrap.Modal(document.getElementById('uploadSpecsModal'));
+    modal.show();
+}
+
+// Function to show frame detail modal
+function showFrameDetail(frameIndex, similarityScore, phaseName, userFrameUrl, referenceFrameUrl, issues) {
+    // Remove any existing modal
+    const existingModal = document.getElementById('frameDetailModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // Create new modal HTML
+    const modalHTML = `
+        <div class="modal fade" id="frameDetailModal" tabindex="-1">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">${phaseName} - Frame ${frameIndex + 1}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="container-fluid">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h4 class="text-center mb-3">Your Swing</h4>
+                                    <img src="${userFrameUrl}" class="img-fluid" alt="Your Frame">
+                                </div>
+                                <div class="col-md-6">
+                                    <h4 class="text-center mb-3">Reference</h4>
+                                    <img src="${referenceFrameUrl}" class="img-fluid" alt="Reference Frame">
+                                </div>
+                            </div>
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <h5>Similarity Score: ${similarityScore}%</h5>
+                                    <div class="progress mb-3">
+                                        <div class="progress-bar ${similarityScore < 70 ? 'bg-warning' : ''}" 
+                                             role="progressbar" 
+                                             style="width: ${similarityScore}%"
+                                             aria-valuenow="${similarityScore}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                    <div class="issues-container mt-3">
+                                        ${issues}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to document
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('frameDetailModal'));
+    modal.show();
+    
+    // Clean up modal when hidden
+    document.getElementById('frameDetailModal').addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
+}
 
 // Handle form submission
 async function handleFormSubmit(event) {
@@ -402,79 +539,113 @@ function displayResults(results, playerId) {
                 `data:image/jpeg;base64,${frame.user_annotated}` : '';
             const refAnnotatedUrl = frame.ref_annotated ? 
                 `data:image/jpeg;base64,${frame.ref_annotated}` : '';
-            
-            // Log the frames for debugging
-            console.log(`Frame ${index} user annotated:`, userAnnotatedUrl ? 'present' : 'missing');
-            console.log(`Frame ${index} ref annotated:`, refAnnotatedUrl ? 'present' : 'missing');
 
             // Determine the phase name based on index
             const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
             
-            // Create issues list
+            // Create issues list HTML
             let issuesHtml = '';
-            if (frame.issues && frame.issues.length > 0) {
+            const stanceIssues = frame.annotations.filter(a => a.type.startsWith('stance_'));
+            const otherIssues = frame.issues.filter(issue => !issue.type || !issue.type.startsWith('stance_'));
+            
+            if (stanceIssues.length > 0 || frame.issues.length > 0) {
                 issuesHtml = '<ul class="list-group list-group-flush">';
+                
+                // Add stance-specific feedback first
+                stanceIssues.forEach(stance => {
+                    issuesHtml += `
+                        <li class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong>${stance.description}</strong>
+                                    <div class="text-muted small">${stance.details}</div>
+                                </div>
+                                <span class="badge bg-warning">${(stance.magnitude * 100).toFixed(0)}% diff</span>
+                            </div>
+                        </li>`;
+                });
+                
+                // Add other issues
                 frame.issues.forEach(issue => {
                     issuesHtml += `<li class="list-group-item">${issue.description}</li>`;
                 });
+                
                 issuesHtml += '</ul>';
             } else {
-                issuesHtml = '<p class="card-text text-success">No issues detected</p>';
+                issuesHtml = '<p class="card-text text-success">Perfect form!</p>';
             }
             
-            // Set card content
-            card.innerHTML = `
-                <div class="card h-100">
-                    <div class="card-header bg-primary text-white">
-                        ${phaseName} - Frame ${frame.frame_index + 1}
-                    </div>
-                    <div class="row g-0">
-                        <div class="col-6">
-                            <div class="p-2">
-                                <h6 class="text-center mb-2">Your Swing</h6>                                ${userAnnotatedUrl ? 
-                                    `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
-                                    `<div class="text-center p-3 bg-light">
-                                        <div class="swing-phase-icon">
-                                            <i class="bi bi-camera-video"></i>
-                                            <div class="mt-2">Frame ${frame.frame_index + 1}</div>
-                                        </div>
-                                    </div>`
-                                }
-                            </div>
+            // Escape the issues HTML for the onclick handler
+            const escapedIssuesHtml = issuesHtml.replace(/`/g, '\\`').replace(/'/g, "\\'").replace(/"/g, '\\"');
+            
+            // Create the card content
+            const cardContent = document.createElement('div');
+            cardContent.className = 'card h-100';
+            cardContent.style.cursor = 'pointer';
+            cardContent.addEventListener('click', () => {
+                showFrameDetail(
+                    frame.frame_index,
+                    Math.round(frame.similarity_score * 100),
+                    phaseName,
+                    userAnnotatedUrl,
+                    refAnnotatedUrl,
+                    escapedIssuesHtml
+                );
+            });
+
+            // Set the card's inner HTML
+            cardContent.innerHTML = `
+                <div class="card-header bg-primary text-white">
+                    ${phaseName} - Frame ${frame.frame_index + 1}
+                </div>
+                <div class="row g-0">
+                    <div class="col-6">
+                        <div class="p-2">
+                            <h6 class="text-center mb-2">Your Swing</h6>
+                            ${userAnnotatedUrl ? 
+                                `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                `<div class="text-center p-3 bg-light">
+                                    <div class="swing-phase-icon">
+                                        <i class="bi bi-camera-video"></i>
+                                        <div class="mt-2">Frame ${frame.frame_index + 1}</div>
+                                    </div>
+                                </div>`
+                            }
                         </div>
-                        <div class="col-6">
-                            <div class="p-2">
-                                <h6 class="text-center mb-2">Reference</h6>
-                                ${refAnnotatedUrl ? 
-                                    `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
-                                    `<div class="text-center p-3 bg-light">
-                                        <div class="swing-phase-icon">
-                                            <i class="bi bi-camera-video"></i>
-                                            <div class="mt-2">Reference ${frame.frame_index + 1}</div>
-                                        </div>
-                                    </div>`
-                                }
-                            </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-2">
+                            <h6 class="text-center mb-2">Reference</h6>
+                            ${refAnnotatedUrl ? 
+                                `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                `<div class="text-center p-3 bg-light">
+                                    <div class="swing-phase-icon">
+                                        <i class="bi bi-camera-video"></i>
+                                        <div class="mt-2">Reference ${frame.frame_index + 1}</div>
+                                    </div>
+                                </div>`
+                            }
                         </div>
                     </div>
-                    <div class="card-body">                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
-                        <div class="progress mb-3">
-                            <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
-                                style="width: ${Math.round(frame.similarity_score * 100)}%" 
-                                aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
-                        </div>
-                        <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
-                            ${frame.issues && frame.issues.length > 0 ? 'Issues Detected:' : 'Perfect!'}
-                        </h6>
-                        ${issuesHtml}
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
+                    <div class="progress mb-3">
+                        <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
+                            style="width: ${Math.round(frame.similarity_score * 100)}%" 
+                            aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
                     </div>
+                    <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
+                        ${frame.issues && frame.issues.length > 0 ? 'Issues Detected:' : 'Perfect!'}
+                    </h6>
+                    ${issuesHtml}
                 </div>
             `;
 
-            
+            card.appendChild(cardContent);
             cardDeck.appendChild(card);
         });
-        
+
         comparisonDiv.appendChild(cardDeck);
         container.appendChild(comparisonDiv);
         
@@ -548,5 +719,92 @@ function fileToBase64(file) {
             resolve(base64);
         };
         reader.onerror = error => reject(error);
+    });
+}
+
+// Function to show frame detail in a modal
+function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUrl, refAnnotatedUrl, issuesHtml) {
+    // Remove any existing modal
+    const existingModal = document.getElementById('frameDetailModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Create new modal container
+    const modalContainer = document.createElement('div');
+    modalContainer.id = 'frameDetailModal';
+    modalContainer.className = 'modal fade';
+    modalContainer.setAttribute('tabindex', '-1');
+
+    // Set modal content
+    modalContainer.innerHTML = `
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">${phaseName} - Frame ${frameIndex + 1}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container-fluid">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h4 class="text-center mb-3">Your Swing</h4>
+                                <div class="text-center">
+                                    ${userAnnotatedUrl ? 
+                                        `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frameIndex + 1}" style="max-height: 70vh; object-fit: contain;">` : 
+                                        `<div class="p-3 bg-light">
+                                            <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
+                                            <p class="mt-2">Frame not available</p>
+                                        </div>`
+                                    }
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h4 class="text-center mb-3">Reference</h4>
+                                <div class="text-center">
+                                    ${refAnnotatedUrl ? 
+                                        `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frameIndex + 1}" style="max-height: 70vh; object-fit: contain;">` : 
+                                        `<div class="p-3 bg-light">
+                                            <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
+                                            <p class="mt-2">Frame not available</p>
+                                        </div>`
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <h5>Similarity Score: ${similarityScore}%</h5>
+                                <div class="progress mb-3" style="height: 20px;">
+                                    <div class="progress-bar ${similarityScore < 70 ? 'bg-warning' : ''}" 
+                                         role="progressbar" 
+                                         style="width: ${similarityScore}%" 
+                                         aria-valuenow="${similarityScore}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="100">
+                                    </div>
+                                </div>
+                                <div class="issues-section mt-4">
+                                    <h5>Analysis</h5>
+                                    ${issuesHtml}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add modal to document
+    document.body.appendChild(modalContainer);
+
+    // Initialize and show the modal
+    const modal = new bootstrap.Modal(modalContainer);
+    modal.show();
+
+    // Clean up on close
+    modalContainer.addEventListener('hidden.bs.modal', function() {
+        this.remove();
     });
 }

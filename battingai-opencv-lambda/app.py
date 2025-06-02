@@ -482,6 +482,9 @@ def compare_frames(user_frames, reference_frames):
         user_edge_count = np.count_nonzero(user_edges)
         ref_edge_count = np.count_nonzero(ref_edges)
         edge_ratio = min(user_edge_count, ref_edge_count) / max(user_edge_count, ref_edge_count) if max(user_edge_count, ref_edge_count) > 0 else 0
+          # Initialize lists for annotations and issues
+        annotations = []
+        issues = []
         
         # Analyze stance width and height
         user_stance = detect_batter_position(user_frame)
