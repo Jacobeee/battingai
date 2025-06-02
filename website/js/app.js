@@ -53,9 +53,7 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('BattingAI app initialized');
     console.log('API URL:', API_URL);
     
-    // Run API tests
-    testApiEndpoints();
-      // Add help button and modal for upload specifications
+    // Add help button and modal for upload specifications
     const helpButton = document.createElement('button');
     helpButton.textContent = 'What should I upload?';
     helpButton.className = 'btn btn-info';
@@ -94,25 +92,81 @@ document.addEventListener('DOMContentLoaded', function() {
     `;
     document.body.appendChild(modal);
 
-    // Add debug button
-    const debugButton = document.createElement('button');
-    debugButton.textContent = 'Debug API Connection';
-    debugButton.className = 'btn btn-secondary';
-    debugButton.style.marginLeft = '10px';
-    debugButton.addEventListener('click', function(e) {
-        e.preventDefault();
-        testApiEndpoints();
-    });
-    
+    // Create frame detail modal container
+    const frameDetailModal = document.createElement('div');
+    frameDetailModal.id = 'frameDetailModal';
+    frameDetailModal.className = 'modal fade';
+    frameDetailModal.innerHTML = `
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container-fluid">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h4 class="text-center mb-3">Your Swing</h4>
+                                <img class="img-fluid user-frame mb-3" alt="Your Frame">
+                            </div>
+                            <div class="col-md-6">
+                                <h4 class="text-center mb-3">Reference</h4>
+                                <img class="img-fluid reference-frame mb-3" alt="Reference Frame">
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <h5 class="similarity-score"></h5>
+                                <div class="progress mb-3">
+                                    <div class="progress-bar" role="progressbar"></div>
+                                </div>
+                                <div class="issues-container"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(frameDetailModal);
+
     const submitButton = document.querySelector('button[type="submit"]');
     submitButton.parentNode.insertBefore(helpButton, submitButton.nextSibling);
-    submitButton.parentNode.insertBefore(debugButton, helpButton.nextSibling);
 });
 
 // Function to show upload specifications modal
 function showUploadSpecsModal() {
     const modal = new bootstrap.Modal(document.getElementById('uploadSpecsModal'));
     modal.show();
+}
+
+// Function to show frame detail modal
+function showFrameDetail(frameIndex, similarityScore, phaseName, userFrameUrl, referenceFrameUrl, issuesHtml) {
+    const modal = document.getElementById('frameDetailModal');
+    
+    // Set modal title
+    modal.querySelector('.modal-title').textContent = `${phaseName} - Frame ${frameIndex + 1}`;
+    
+    // Set frame images
+    modal.querySelector('.user-frame').src = userFrameUrl;
+    modal.querySelector('.reference-frame').src = referenceFrameUrl;
+    
+    // Set similarity score
+    modal.querySelector('.similarity-score').textContent = `Similarity: ${similarityScore}%`;
+    
+    // Set progress bar
+    const progressBar = modal.querySelector('.progress-bar');
+    progressBar.style.width = `${similarityScore}%`;
+    progressBar.setAttribute('aria-valuenow', similarityScore);
+    progressBar.classList.toggle('bg-warning', similarityScore < 70);
+    
+    // Set issues
+    modal.querySelector('.issues-container').innerHTML = issuesHtml;
+    
+    // Show modal
+    const frameDetailModal = new bootstrap.Modal(modal);
+    frameDetailModal.show();
 }
 
 // Handle form submission
@@ -469,14 +523,15 @@ function displayResults(results, playerId) {
             
             // Set card content
             card.innerHTML = `
-                <div class="card h-100">
+                <div class="card h-100" style="cursor: pointer;" onclick="showFrameDetail(${frame.frame_index}, ${Math.round(frame.similarity_score * 100)}, '${phaseName}', '${userAnnotatedUrl}', '${refAnnotatedUrl}', \`${issuesHtml}\`)">
                     <div class="card-header bg-primary text-white">
                         ${phaseName} - Frame ${frame.frame_index + 1}
                     </div>
                     <div class="row g-0">
                         <div class="col-6">
                             <div class="p-2">
-                                <h6 class="text-center mb-2">Your Swing</h6>                                ${userAnnotatedUrl ? 
+                                <h6 class="text-center mb-2">Your Swing</h6>
+                                ${userAnnotatedUrl ? 
                                     `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
                                     `<div class="text-center p-3 bg-light">
                                         <div class="swing-phase-icon">
@@ -502,7 +557,8 @@ function displayResults(results, playerId) {
                             </div>
                         </div>
                     </div>
-                    <div class="card-body">                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
+                    <div class="card-body">
+                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
                         <div class="progress mb-3">
                             <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
                                 style="width: ${Math.round(frame.similarity_score * 100)}%" 
@@ -593,5 +649,72 @@ function fileToBase64(file) {
             resolve(base64);
         };
         reader.onerror = error => reject(error);
+    });
+}
+
+// Function to show frame detail in a modal
+function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUrl, refAnnotatedUrl, issuesHtml) {
+    // Create modal HTML
+    const modalHtml = `
+        <div class="modal fade" id="frameDetailModal" tabindex="-1" aria-labelledby="frameDetailModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="frameDetailModalLabel">${phaseName} - Frame ${frameIndex + 1}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>Your Swing</h6>
+                                ${userAnnotatedUrl ? 
+                                    `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frameIndex + 1}" style="max-height: 400px; object-fit: contain;">` : 
+                                    `<div class="text-center p-3 bg-light">
+                                        <div class="swing-phase-icon" style="font-size: 4rem;">
+                                            <i class="bi bi-camera-video"></i>
+                                        </div>
+                                    </div>`
+                                }
+                            </div>
+                            <div class="col-md-6">
+                                <h6>Reference</h6>
+                                ${refAnnotatedUrl ? 
+                                    `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frameIndex + 1}" style="max-height: 400px; object-fit: contain;">` : 
+                                    `<div class="text-center p-3 bg-light">
+                                        <div class="swing-phase-icon" style="font-size: 4rem;">
+                                            <i class="bi bi-camera-video"></i>
+                                        </div>
+                                    </div>`
+                                }
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <h6>Similarity Score: ${similarityScore}%</h6>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar ${similarityScore < 70 ? 'bg-warning' : ''}" role="progressbar" 
+                                    style="width: ${similarityScore}%" 
+                                    aria-valuenow="${similarityScore}" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <h6>Issues Detected</h6>
+                            ${issuesHtml}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Insert modal HTML into the body
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Show the modal
+    const modal = new bootstrap.Modal(document.getElementById('frameDetailModal'));
+    modal.show();
+    
+    // Clean up modal element after it's closed
+    document.getElementById('frameDetailModal').addEventListener('hidden.bs.modal', function () {
+        this.remove();
     });
 }
