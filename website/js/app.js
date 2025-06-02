@@ -142,31 +142,69 @@ function showUploadSpecsModal() {
 }
 
 // Function to show frame detail modal
-function showFrameDetail(frameIndex, similarityScore, phaseName, userFrameUrl, referenceFrameUrl, issuesHtml) {
-    const modal = document.getElementById('frameDetailModal');
+function showFrameDetail(frameIndex, similarityScore, phaseName, userFrameUrl, referenceFrameUrl, issues) {
+    // Remove any existing modal
+    const existingModal = document.getElementById('frameDetailModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
     
-    // Set modal title
-    modal.querySelector('.modal-title').textContent = `${phaseName} - Frame ${frameIndex + 1}`;
+    // Create new modal HTML
+    const modalHTML = `
+        <div class="modal fade" id="frameDetailModal" tabindex="-1">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">${phaseName} - Frame ${frameIndex + 1}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="container-fluid">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h4 class="text-center mb-3">Your Swing</h4>
+                                    <img src="${userFrameUrl}" class="img-fluid" alt="Your Frame">
+                                </div>
+                                <div class="col-md-6">
+                                    <h4 class="text-center mb-3">Reference</h4>
+                                    <img src="${referenceFrameUrl}" class="img-fluid" alt="Reference Frame">
+                                </div>
+                            </div>
+                            <div class="row mt-4">
+                                <div class="col-12">
+                                    <h5>Similarity Score: ${similarityScore}%</h5>
+                                    <div class="progress mb-3">
+                                        <div class="progress-bar ${similarityScore < 70 ? 'bg-warning' : ''}" 
+                                             role="progressbar" 
+                                             style="width: ${similarityScore}%"
+                                             aria-valuenow="${similarityScore}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                    <div class="issues-container mt-3">
+                                        ${issues}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
     
-    // Set frame images
-    modal.querySelector('.user-frame').src = userFrameUrl;
-    modal.querySelector('.reference-frame').src = referenceFrameUrl;
-    
-    // Set similarity score
-    modal.querySelector('.similarity-score').textContent = `Similarity: ${similarityScore}%`;
-    
-    // Set progress bar
-    const progressBar = modal.querySelector('.progress-bar');
-    progressBar.style.width = `${similarityScore}%`;
-    progressBar.setAttribute('aria-valuenow', similarityScore);
-    progressBar.classList.toggle('bg-warning', similarityScore < 70);
-    
-    // Set issues
-    modal.querySelector('.issues-container').innerHTML = issuesHtml;
+    // Add modal to document
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
     
     // Show modal
-    const frameDetailModal = new bootstrap.Modal(modal);
-    frameDetailModal.show();
+    const modal = new bootstrap.Modal(document.getElementById('frameDetailModal'));
+    modal.show();
+    
+    // Clean up modal when hidden
+    document.getElementById('frameDetailModal').addEventListener('hidden.bs.modal', function() {
+        this.remove();
+    });
 }
 
 // Handle form submission
@@ -501,15 +539,11 @@ function displayResults(results, playerId) {
                 `data:image/jpeg;base64,${frame.user_annotated}` : '';
             const refAnnotatedUrl = frame.ref_annotated ? 
                 `data:image/jpeg;base64,${frame.ref_annotated}` : '';
-            
-            // Log the frames for debugging
-            console.log(`Frame ${index} user annotated:`, userAnnotatedUrl ? 'present' : 'missing');
-            console.log(`Frame ${index} ref annotated:`, refAnnotatedUrl ? 'present' : 'missing');
 
             // Determine the phase name based on index
             const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
             
-            // Create issues list
+            // Create issues list HTML
             let issuesHtml = '';
             if (frame.issues && frame.issues.length > 0) {
                 issuesHtml = '<ul class="list-group list-group-flush">';
@@ -518,64 +552,75 @@ function displayResults(results, playerId) {
                 });
                 issuesHtml += '</ul>';
             } else {
-                issuesHtml = '<p class="card-text text-success">No issues detected</p>';
-            }
-            
-            // Set card content
-            card.innerHTML = `
-                <div class="card h-100" style="cursor: pointer;" onclick="showFrameDetail(${frame.frame_index}, ${Math.round(frame.similarity_score * 100)}, '${phaseName}', '${userAnnotatedUrl}', '${refAnnotatedUrl}', \`${issuesHtml}\`)">
-                    <div class="card-header bg-primary text-white">
-                        ${phaseName} - Frame ${frame.frame_index + 1}
-                    </div>
-                    <div class="row g-0">
-                        <div class="col-6">
-                            <div class="p-2">
-                                <h6 class="text-center mb-2">Your Swing</h6>
-                                ${userAnnotatedUrl ? 
-                                    `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
-                                    `<div class="text-center p-3 bg-light">
-                                        <div class="swing-phase-icon">
-                                            <i class="bi bi-camera-video"></i>
-                                            <div class="mt-2">Frame ${frame.frame_index + 1}</div>
-                                        </div>
-                                    </div>`
-                                }
-                            </div>
-                        </div>
-                        <div class="col-6">
-                            <div class="p-2">
-                                <h6 class="text-center mb-2">Reference</h6>
-                                ${refAnnotatedUrl ? 
-                                    `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
-                                    `<div class="text-center p-3 bg-light">
-                                        <div class="swing-phase-icon">
-                                            <i class="bi bi-camera-video"></i>
-                                            <div class="mt-2">Reference ${frame.frame_index + 1}</div>
-                                        </div>
-                                    </div>`
-                                }
-                            </div>
+                issuesHtml = '<p class="card-text text-success">Perfect form!</p>';
+            }            // Create the card content
+            const cardContent = document.createElement('div');
+            cardContent.className = 'card h-100';
+            cardContent.style.cursor = 'pointer';
+            cardContent.addEventListener('click', () => {
+                showFrameDetail(
+                    frame.frame_index,
+                    Math.round(frame.similarity_score * 100),
+                    phaseName,
+                    userAnnotatedUrl,
+                    refAnnotatedUrl,
+                    issuesHtml
+                );
+            });
+
+            // Set the card's inner HTML
+            cardContent.innerHTML = `
+                <div class="card-header bg-primary text-white">
+                    ${phaseName} - Frame ${frame.frame_index + 1}
+                </div>
+                <div class="row g-0">
+                    <div class="col-6">
+                        <div class="p-2">
+                            <h6 class="text-center mb-2">Your Swing</h6>
+                            ${userAnnotatedUrl ? 
+                                `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                `<div class="text-center p-3 bg-light">
+                                    <div class="swing-phase-icon">
+                                        <i class="bi bi-camera-video"></i>
+                                        <div class="mt-2">Frame ${frame.frame_index + 1}</div>
+                                    </div>
+                                </div>`
+                            }
                         </div>
                     </div>
-                    <div class="card-body">
-                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
-                        <div class="progress mb-3">
-                            <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
-                                style="width: ${Math.round(frame.similarity_score * 100)}%" 
-                                aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
+                    <div class="col-6">
+                        <div class="p-2">
+                            <h6 class="text-center mb-2">Reference</h6>
+                            ${refAnnotatedUrl ? 
+                                `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                `<div class="text-center p-3 bg-light">
+                                    <div class="swing-phase-icon">
+                                        <i class="bi bi-camera-video"></i>
+                                        <div class="mt-2">Reference ${frame.frame_index + 1}</div>
+                                    </div>
+                                </div>`
+                            }
                         </div>
-                        <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
-                            ${frame.issues && frame.issues.length > 0 ? 'Issues Detected:' : 'Perfect!'}
-                        </h6>
-                        ${issuesHtml}
                     </div>
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
+                    <div class="progress mb-3">
+                        <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
+                            style="width: ${Math.round(frame.similarity_score * 100)}%" 
+                            aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
+                        ${frame.issues && frame.issues.length > 0 ? 'Issues Detected:' : 'Perfect!'}
+                    </h6>
+                    ${issuesHtml}
                 </div>
             `;
 
-            
+            card.appendChild(cardContent);
             cardDeck.appendChild(card);
         });
-        
+
         comparisonDiv.appendChild(cardDeck);
         container.appendChild(comparisonDiv);
         
@@ -654,67 +699,87 @@ function fileToBase64(file) {
 
 // Function to show frame detail in a modal
 function showFrameDetail(frameIndex, similarityScore, phaseName, userAnnotatedUrl, refAnnotatedUrl, issuesHtml) {
-    // Create modal HTML
-    const modalHtml = `
-        <div class="modal fade" id="frameDetailModal" tabindex="-1" aria-labelledby="frameDetailModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="frameDetailModalLabel">${phaseName} - Frame ${frameIndex + 1}</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
+    // Remove any existing modal
+    const existingModal = document.getElementById('frameDetailModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Create new modal container
+    const modalContainer = document.createElement('div');
+    modalContainer.id = 'frameDetailModal';
+    modalContainer.className = 'modal fade';
+    modalContainer.setAttribute('tabindex', '-1');
+
+    // Set modal content
+    modalContainer.innerHTML = `
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">${phaseName} - Frame ${frameIndex + 1}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="container-fluid">
                         <div class="row">
                             <div class="col-md-6">
-                                <h6>Your Swing</h6>
-                                ${userAnnotatedUrl ? 
-                                    `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frameIndex + 1}" style="max-height: 400px; object-fit: contain;">` : 
-                                    `<div class="text-center p-3 bg-light">
-                                        <div class="swing-phase-icon" style="font-size: 4rem;">
-                                            <i class="bi bi-camera-video"></i>
-                                        </div>
-                                    </div>`
-                                }
+                                <h4 class="text-center mb-3">Your Swing</h4>
+                                <div class="text-center">
+                                    ${userAnnotatedUrl ? 
+                                        `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frameIndex + 1}" style="max-height: 70vh; object-fit: contain;">` : 
+                                        `<div class="p-3 bg-light">
+                                            <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
+                                            <p class="mt-2">Frame not available</p>
+                                        </div>`
+                                    }
+                                </div>
                             </div>
                             <div class="col-md-6">
-                                <h6>Reference</h6>
-                                ${refAnnotatedUrl ? 
-                                    `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frameIndex + 1}" style="max-height: 400px; object-fit: contain;">` : 
-                                    `<div class="text-center p-3 bg-light">
-                                        <div class="swing-phase-icon" style="font-size: 4rem;">
-                                            <i class="bi bi-camera-video"></i>
-                                        </div>
-                                    </div>`
-                                }
+                                <h4 class="text-center mb-3">Reference</h4>
+                                <div class="text-center">
+                                    ${refAnnotatedUrl ? 
+                                        `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frameIndex + 1}" style="max-height: 70vh; object-fit: contain;">` : 
+                                        `<div class="p-3 bg-light">
+                                            <i class="bi bi-camera-video" style="font-size: 3rem;"></i>
+                                            <p class="mt-2">Frame not available</p>
+                                        </div>`
+                                    }
+                                </div>
                             </div>
                         </div>
-                        <div class="mt-3">
-                            <h6>Similarity Score: ${similarityScore}%</h6>
-                            <div class="progress" style="height: 20px;">
-                                <div class="progress-bar ${similarityScore < 70 ? 'bg-warning' : ''}" role="progressbar" 
-                                    style="width: ${similarityScore}%" 
-                                    aria-valuenow="${similarityScore}" aria-valuemin="0" aria-valuemax="100"></div>
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <h5>Similarity Score: ${similarityScore}%</h5>
+                                <div class="progress mb-3" style="height: 20px;">
+                                    <div class="progress-bar ${similarityScore < 70 ? 'bg-warning' : ''}" 
+                                         role="progressbar" 
+                                         style="width: ${similarityScore}%" 
+                                         aria-valuenow="${similarityScore}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="100">
+                                    </div>
+                                </div>
+                                <div class="issues-section mt-4">
+                                    <h5>Analysis</h5>
+                                    ${issuesHtml}
+                                </div>
                             </div>
-                        </div>
-                        <div class="mt-3">
-                            <h6>Issues Detected</h6>
-                            ${issuesHtml}
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     `;
-    
-    // Insert modal HTML into the body
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // Show the modal
-    const modal = new bootstrap.Modal(document.getElementById('frameDetailModal'));
+
+    // Add modal to document
+    document.body.appendChild(modalContainer);
+
+    // Initialize and show the modal
+    const modal = new bootstrap.Modal(modalContainer);
     modal.show();
-    
-    // Clean up modal element after it's closed
-    document.getElementById('frameDetailModal').addEventListener('hidden.bs.modal', function () {
+
+    // Clean up on close
+    modalContainer.addEventListener('hidden.bs.modal', function() {
         this.remove();
     });
 }
