@@ -55,7 +55,45 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Run API tests
     testApiEndpoints();
-    
+      // Add help button and modal for upload specifications
+    const helpButton = document.createElement('button');
+    helpButton.textContent = 'What should I upload?';
+    helpButton.className = 'btn btn-info';
+    helpButton.style.marginLeft = '10px';
+    helpButton.addEventListener('click', function(e) {
+        e.preventDefault();
+        showUploadSpecsModal();
+    });
+
+    // Create modal container
+    const modal = document.createElement('div');
+    modal.id = 'uploadSpecsModal';
+    modal.className = 'modal fade';
+    modal.innerHTML = `
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Video Upload Requirements</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <h6>For best results, please ensure your video meets these requirements:</h6>
+                    <ul>
+                        <li><strong>Full Body View:</strong> The entire batter must be visible in all frames, from head to feet</li>
+                        <li><strong>Camera Position:</strong> Record from a side view, perpendicular to the batter's stance</li>
+                        <li><strong>Framing:</strong> Keep the batter centered in the frame</li>
+                        <li><strong>Background:</strong> A clean, uncluttered background helps with analysis</li>
+                        <li><strong>Lighting:</strong> Good, consistent lighting throughout the swing</li>
+                    </ul>
+                    <div class="alert alert-info">
+                        <strong>Tip:</strong> Position the camera at about waist height, 10-15 feet away from the batter
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
     // Add debug button
     const debugButton = document.createElement('button');
     debugButton.textContent = 'Debug API Connection';
@@ -67,8 +105,15 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     const submitButton = document.querySelector('button[type="submit"]');
-    submitButton.parentNode.insertBefore(debugButton, submitButton.nextSibling);
+    submitButton.parentNode.insertBefore(helpButton, submitButton.nextSibling);
+    submitButton.parentNode.insertBefore(debugButton, helpButton.nextSibling);
 });
+
+// Function to show upload specifications modal
+function showUploadSpecsModal() {
+    const modal = new bootstrap.Modal(document.getElementById('uploadSpecsModal'));
+    modal.show();
+}
 
 // Handle form submission
 async function handleFormSubmit(event) {

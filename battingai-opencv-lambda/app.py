@@ -415,12 +415,18 @@ def compare_frames(user_frames, reference_frames):
     # Ensure we have the same number of frames to compare
     min_frames = min(len(user_frames), len(reference_frames))
     user_frames = user_frames[:min_frames]
-    reference_frames = reference_frames[:min_frames]
-    
+    reference_frames = reference_frames[:min_frames]    
     comparison_results = []
-    
     for i, (user_frame, ref_frame) in enumerate(zip(user_frames, reference_frames)):
-        # Create copies for annotation
+        # Create ROI masks based on center region where batter is likely to be
+        h, w = user_frame.shape[:2]
+        center_x = w // 2
+        roi_width = w // 2  # Use middle 50% of frame width
+        user_mask = np.zeros_like(cv2.cvtColor(user_frame, cv2.COLOR_BGR2GRAY))
+        ref_mask = np.zeros_like(cv2.cvtColor(ref_frame, cv2.COLOR_BGR2GRAY))
+        user_mask[:, center_x - roi_width//2:center_x + roi_width//2] = 255
+        ref_mask[:, center_x - roi_width//2:center_x + roi_width//2] = 255
+          # Create copies for annotation
         user_annotated = user_frame.copy()
         ref_annotated = ref_frame.copy()
         
@@ -447,40 +453,46 @@ def compare_frames(user_frames, reference_frames):
             cv2.rectangle(ref_annotated,
                          (ref_bat['x'], ref_bat['y']),
                          (ref_bat['x'] + ref_bat['w'], ref_bat['y'] + ref_bat['h']),
-                         (0, 255, 0), 2)
-
-        # Calculate pose differences
-        pose_difference = cv2.absdiff(user_l, ref_l)
-        significant_diff = cv2.threshold(pose_difference, 50, 255, cv2.THRESH_BINARY)[1]
+                         (0, 255, 0), 2)        # Pose difference visualization temporarily disabled
+        pose_difference = np.zeros_like(user_l)
+        significant_diff = np.zeros_like(pose_difference)
         
-        # Overlay pose differences
-        pose_overlay = cv2.cvtColor(significant_diff, cv2.COLOR_GRAY2BGR)
-        pose_overlay[..., 0] = 0  # Set blue channel to 0
-        pose_overlay[..., 2] = 0  # Set red channel to 0
-        
-        # Add overlay to annotated images with 50% transparency
-        cv2.addWeighted(user_annotated, 0.7, pose_overlay, 0.3, 0, user_annotated)
-          # Calculate edge ratio for stance analysis
+        # Skip overlay for now since we're not using advanced isolation
+        user_annotated = user_frame.copy()
+        ref_annotated = ref_frame.copy()        # Calculate edge ratio for stance analysis using masked frames
         user_gray = cv2.cvtColor(user_frame, cv2.COLOR_BGR2GRAY)
         ref_gray = cv2.cvtColor(ref_frame, cv2.COLOR_BGR2GRAY)
-        user_edges = cv2.Canny(user_gray, 100, 200)
-        ref_edges = cv2.Canny(ref_gray, 100, 200)
         
-        # Calculate edge ratio
+        # Apply Canny edge detection with auto-threshold
+        user_median = np.median(user_gray)
+        ref_median = np.median(ref_gray)
+        user_sigma = 0.33
+        ref_sigma = 0.33
+        
+        # Compute thresholds based on median pixel values
+        user_lower = int(max(0, (1.0 - user_sigma) * user_median))
+        user_upper = int(min(255, (1.0 + user_sigma) * user_median))
+        ref_lower = int(max(0, (1.0 - ref_sigma) * ref_median))
+        ref_upper = int(min(255, (1.0 + ref_sigma) * ref_median))
+        
+        # Apply edge detection with dynamic thresholds
+        user_edges = cv2.Canny(user_gray, user_lower, user_upper)
+        ref_edges = cv2.Canny(ref_gray, ref_lower, ref_upper)
+          # Use whole frame edge detection temporarily instead of isolated regions
         user_edge_count = np.count_nonzero(user_edges)
         ref_edge_count = np.count_nonzero(ref_edges)
         edge_ratio = min(user_edge_count, ref_edge_count) / max(user_edge_count, ref_edge_count) if max(user_edge_count, ref_edge_count) > 0 else 0
         
-        # Calculate stance similarity
+        # Calculate basic stance similarity
         stance_diff = abs(user_edge_count - ref_edge_count) / max(user_edge_count, ref_edge_count)
-        stance_similarity = 1.0 - stance_diff  # Keep as decimal between 0 and 1
-        
-        # Calculate histogram similarity
-        user_hist = cv2.calcHist([user_frame], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
-        ref_hist = cv2.calcHist([ref_frame], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+        stance_similarity = 1.0 - stance_diff  # Keep as decimal between 0 and 1        # Calculate histogram similarity using center ROI only
+        user_hist = cv2.calcHist([user_frame], [0, 1, 2], user_mask, [8, 8, 8], [0, 256, 0, 256, 0, 256])
+        ref_hist = cv2.calcHist([ref_frame], [0, 1, 2], ref_mask, [8, 8, 8], [0, 256, 0, 256, 0, 256])
         cv2.normalize(user_hist, user_hist)
         cv2.normalize(ref_hist, ref_hist)
         hist_similarity = max(0, min(1, cv2.compareHist(user_hist, ref_hist, cv2.HISTCMP_CORREL)))
+        # Apply a stricter threshold to histogram similarity
+        hist_similarity = hist_similarity * 0.8  # Reduce weight of histogram similarity
         
         # Calculate pose similarity from difference matrix
         pose_similarity = 1.0 - (np.sum(pose_difference) / (pose_difference.shape[0] * pose_difference.shape[1] * 255))
@@ -1198,3 +1210,48 @@ def detect_bat_region(frame):
                 bat_region = {'x': x, 'y': y, 'w': w, 'h': h}
     
     return bat_region
+
+# Temporarily disabled batter isolation functionality
+def isolate_batter(frame):
+    return frame
+    """Isolate the batter in the frame using background subtraction and segmentation"""
+    # Convert to grayscale for processing
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    # Apply GaussianBlur to reduce noise
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    
+    # Use adaptive thresholding to handle different lighting conditions
+    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                 cv2.THRESH_BINARY_INV, 11, 2)
+    
+    # Find contours to identify the batter's silhouette
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Create a mask for the batter
+    mask = np.zeros_like(gray)
+    
+    if contours:
+        # Find the largest contour (likely the batter)
+        largest_contour = max(contours, key=cv2.contourArea)
+        
+        # Filter by minimum area to avoid small noise
+        if cv2.contourArea(largest_contour) > 1000:  # Adjust threshold as needed
+            # Create a convex hull to get a cleaner silhouette
+            hull = cv2.convexHull(largest_contour)
+            
+            # Draw the hull on the mask
+            cv2.drawContours(mask, [hull], -1, (255), -1)
+            
+            # Apply morphological operations to clean up the mask
+            kernel = np.ones((5,5), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    
+    # Convert mask to 3 channels for color images
+    mask_3channel = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+    
+    # Apply the mask to the original frame
+    isolated_frame = cv2.bitwise_and(frame, mask_3channel)
+    
+    return isolated_frame, mask

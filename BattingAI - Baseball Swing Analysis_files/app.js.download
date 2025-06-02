@@ -1,9 +1,9 @@
 // Configuration
 const API_URL = 'https://15zjlknmve.execute-api.us-east-1.amazonaws.com/Prod/';
 const API_ENDPOINTS = {
-    upload: API_URL + 'upload',
-    analyze: API_URL + 'analyze',
-    results: (analysisId) => `${API_URL}results/${analysisId}`
+    upload: `${API_URL}upload`,
+    analyze: `${API_URL}analyze`,
+    results: (analysisId) => `${API_URL}results/${encodeURIComponent(analysisId)}`
 };
 
 // Debug function to test API endpoints
@@ -212,8 +212,7 @@ async function handleFormSubmit(event) {
                 });
                 
                 console.log('Results response status:', resultsResponse.status);
-                
-                if (resultsResponse.ok) {
+                  if (resultsResponse.ok) {
                     let data;
                     try {
                         data = await resultsResponse.json();
@@ -222,17 +221,39 @@ async function handleFormSubmit(event) {
                         console.error('Error parsing results response:', e);
                         continue;
                     }
-                    
-                    if (data.status === 'feedback_generated') {
+                      if (data.status === 'comparison_complete' || data.status === 'feedback_generated') {
                         results = data;
                         break;
+                    } else if (data.error) {
+                        throw new Error(data.error);
                     } else {
                         console.log('Results not ready yet, status:', data.status);
                     }
                 } else {
-                    console.warn('Results request failed:', resultsResponse.status);
+                    let errorText;
+                    try {
+                        errorText = await resultsResponse.text();
+                        console.error('Results request failed:', resultsResponse.status, errorText);
+                    } catch (e) {
+                        console.error('Results request failed:', resultsResponse.status, 'Could not read error response');
+                    }
+                    // If we get a 404, the analysis doesn't exist, so we should break
+                    if (resultsResponse.status === 404) {
+                        throw new Error('Analysis not found - please try uploading again');
+                    }
+                    // For 400 errors, check if it's a known error condition
+                    if (resultsResponse.status === 400 && errorText) {
+                        try {
+                            const errorData = JSON.parse(errorText);
+                            if (errorData.error) {
+                                throw new Error(errorData.error);
+                            }
+                        } catch (e) {
+                            // If we can't parse the error, just continue polling
+                            console.warn('Could not parse error response:', e);
+                        }
+                    }
                 }
-                
                 // Wait before trying again
                 await new Promise(resolve => setTimeout(resolve, 3000));
             } catch (e) {
@@ -372,17 +393,19 @@ function displayResults(results, playerId) {
         // Define swing phase names
         const phaseNames = ['Setup', 'Load', 'Swing', 'Contact', 'Follow-through'];
         
-        results.results.comparison_results.forEach((frame, index) => {
-            // Create a card for each frame
+        results.results.comparison_results.forEach((frame, index) => {            // Create a card for each frame
             const card = document.createElement('div');
             card.className = 'col';
             
-             // Get the frame URL from the results
-            const imageUrl = results.frame_urls && results.frame_urls.length > index ? 
-                results.frame_urls[index] : '';
-    
-            // Log the URL for debugging
-            console.log(`Frame ${index} URL:`, imageUrl);
+            // Get annotated frames from base64 data
+            const userAnnotatedUrl = frame.user_annotated ? 
+                `data:image/jpeg;base64,${frame.user_annotated}` : '';
+            const refAnnotatedUrl = frame.ref_annotated ? 
+                `data:image/jpeg;base64,${frame.ref_annotated}` : '';
+            
+            // Log the frames for debugging
+            console.log(`Frame ${index} user annotated:`, userAnnotatedUrl ? 'present' : 'missing');
+            console.log(`Frame ${index} ref annotated:`, refAnnotatedUrl ? 'present' : 'missing');
 
             // Determine the phase name based on index
             const phaseName = phaseNames[index % phaseNames.length] || `Phase ${index + 1}`;
@@ -408,9 +431,8 @@ function displayResults(results, playerId) {
                     <div class="row g-0">
                         <div class="col-6">
                             <div class="p-2">
-                                <h6 class="text-center mb-2">Your Swing</h6>
-                                ${imageUrl ? 
-                                    `<img src="${imageUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                <h6 class="text-center mb-2">Your Swing</h6>                                ${userAnnotatedUrl ? 
+                                    `<img src="${userAnnotatedUrl}" class="img-fluid" alt="Your Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
                                     `<div class="text-center p-3 bg-light">
                                         <div class="swing-phase-icon">
                                             <i class="bi bi-camera-video"></i>
@@ -423,8 +445,8 @@ function displayResults(results, playerId) {
                         <div class="col-6">
                             <div class="p-2">
                                 <h6 class="text-center mb-2">Reference</h6>
-                                ${results.reference_urls && results.reference_urls.length > index ? 
-                                    `<img src="${results.reference_urls[index]}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
+                                ${refAnnotatedUrl ? 
+                                    `<img src="${refAnnotatedUrl}" class="img-fluid" alt="Reference Frame ${frame.frame_index + 1}" style="max-height: 200px; object-fit: contain;">` : 
                                     `<div class="text-center p-3 bg-light">
                                         <div class="swing-phase-icon">
                                             <i class="bi bi-camera-video"></i>
@@ -435,10 +457,10 @@ function displayResults(results, playerId) {
                             </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
+                    <div class="card-body">                        <h5 class="card-title">Similarity: ${Math.round(frame.similarity_score * 100)}%</h5>
                         <div class="progress mb-3">
-                            <div class="progress-bar" role="progressbar" style="width: ${Math.round(frame.similarity_score * 100)}%" 
+                            <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
+                                style="width: ${Math.round(frame.similarity_score * 100)}%" 
                                 aria-valuenow="${Math.round(frame.similarity_score * 100)}" aria-valuemin="0" aria-valuemax="100"></div>
                         </div>
                         <h6 class="card-subtitle mb-2 ${frame.issues && frame.issues.length > 0 ? 'text-danger' : 'text-success'}">
@@ -488,12 +510,22 @@ function displayResults(results, playerId) {
             } else {
                 issuesHtml = 'No issues detected';
             }
-            
-            table.innerHTML += `
+              table.innerHTML += `
                 <tr>
                     <td>${frame.frame_index + 1}</td>
                     <td>${phaseName}</td>
-                    <td>${Math.round(frame.similarity_score * 100)}%</td>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <div class="progress flex-grow-1" style="height: 20px;">
+                                <div class="progress-bar ${frame.similarity_score < 0.7 ? 'bg-warning' : ''}" role="progressbar" 
+                                    style="width: ${Math.round(frame.similarity_score * 100)}%" 
+                                    aria-valuenow="${Math.round(frame.similarity_score * 100)}" 
+                                    aria-valuemin="0" aria-valuemax="100">
+                                </div>
+                            </div>
+                            <span class="ms-2">${Math.round(frame.similarity_score * 100)}%</span>
+                        </div>
+                    </td>
                     <td>${issuesHtml}</td>
                 </tr>
             `;
