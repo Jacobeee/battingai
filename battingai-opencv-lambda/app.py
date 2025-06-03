@@ -15,6 +15,7 @@ PLAYER_NAMES = {
     'bryce_harper': 'Bryce Harper',
     'brandon_lowe': 'Brandon Lowe',
     'mike_trout': 'Mike Trout',
+    'jonathan_aranda': 'Jonathan Aranda',
     'aaron_judge': 'Aaron Judge',
     'shohei_ohtani': 'Shohei Ohtani'
 }
@@ -67,7 +68,14 @@ def align_frame(frame, batter_position=None):
     return frame
 
 def detect_baseball(frame):
-    """Detect baseball in the frame using circle detection"""
+    """Detect baseball in the frame using circle detection.
+    
+    TODO: Improve Robustness
+    - Replace hard-coded radius values (5,20) with dynamic thresholds
+    - Add velocity-based validation
+    - Implement ML-based ball detection
+    - Add trajectory prediction
+    """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     # Blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (9, 9), 2)
@@ -87,7 +95,14 @@ def detect_baseball(frame):
     return None
 
 def detect_bat(frame):
-    """Detect bat in the frame using edge detection and line detection"""
+    """Detect bat in the frame using edge detection and line detection.
+    
+    TODO: Enhance Detection
+    - Add ML-based bat detection
+    - Implement adaptive thresholding
+    - Track bat angle and speed
+    - Add bat path prediction
+    """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(
@@ -246,7 +261,15 @@ def detect_swing_phase(frames):
     return phases
 
 def extract_frames(video_path, num_frames=5):
-    """Extract key frames from a video file based on fixed percentages"""
+    """Extract key frames from a video file.
+    
+    TODO: Memory Optimization
+    - Replace full frame loading with streaming
+    - Implement frame buffering
+    - Add batch processing
+    - Monitor memory usage
+    - Add frame quality validation
+    """
     print(f"Opening video file: {video_path}")
     cap = cv2.VideoCapture(video_path)
     
@@ -305,7 +328,14 @@ def extract_frames(video_path, num_frames=5):
 
 
 def save_frames_to_s3(frames, analysis_id):
-    """Save extracted frames to S3"""
+    """Save extracted frames to S3.
+    
+    TODO: Storage Optimization
+    - Add frame compression
+    - Implement progressive loading
+    - Add caching layer
+    - Optimize metadata storage
+    """
     frame_paths = []
     frame_urls = []
 
@@ -407,7 +437,15 @@ def get_presigned_url(key, expiration=3600):
 
 
 def compare_frames(user_frames, reference_frames):
-    """Compare user frames with reference frames using advanced image processing"""
+    """Compare user frames with reference frames using advanced image processing.
+    
+    TODO: Enhance Comparison
+    - Re-enable pose difference calculation
+    - Add joint angle analysis
+    - Implement quantitative metrics
+    - Generate specific improvement suggestions
+    - Add visual alignment overlays
+    """
     if not reference_frames:
         print("No reference frames available for comparison")
         return None
@@ -653,7 +691,15 @@ def compare_frames(user_frames, reference_frames):
     return comparison_results
 
 def analyze_swing(user_frames, reference_frames, comparison_results):
-    """Generate comprehensive swing analysis with specific drills and exercises"""
+    """Generate comprehensive swing analysis.
+    
+    TODO: Feedback Enhancement
+    - Add quantitative measurements
+    - Include specific angle comparisons
+    - Generate frame-specific drills
+    - Add visual feedback markers
+    - Implement progression tracking
+    """
     if not comparison_results:
         return {
             "overall_score": 50,
@@ -822,6 +868,56 @@ def analyze_swing(user_frames, reference_frames, comparison_results):
         "comparison_results": comparison_results
     }
 
+# TODO: Enhancement Areas - 2025 Roadmap
+
+"""
+Major areas for improvement:
+
+1. Batter Isolation
+   - Currently disabled (returns original frame)
+   - Need to implement deep learning-based segmentation (e.g., Mask R-CNN or DeepLab)
+   - Consider creating a custom dataset of baseball players for training
+   - Add background subtraction as fallback
+
+2. Parameter Optimization
+   - Replace hard-coded thresholds with dynamic/adaptive values:
+     detect_baseball(): minRadius/maxRadius
+     detect_bat(): aspect ratio thresholds
+     compare_frames(): similarity thresholds
+   - Implement auto-calibration based on video properties
+   - Add configuration file for environment-specific tuning
+
+3. Motion Analysis Enhancements
+   - Current: Basic Shi-Tomasi + Lucas-Kanade
+   - Upgrade to dense optical flow for better tracking
+   - Add deep learning-based pose estimation
+   - Implement motion prediction for fast movements
+
+4. Pose Analysis Pipeline
+   - Re-enable pose difference calculation
+   - Integrate MediaPipe or OpenPose
+   - Add specific joint angle measurements
+   - Implement quantitative pose metrics
+
+5. Frame Selection And Phase Detection
+   - Improve detect_swing_phase() robustness
+   - Add ML-based key frame identification
+   - Implement temporal clustering
+   - Add motion peak analysis
+
+6. Memory Optimization
+   - Current: Loads all frames into memory
+   - Switch to streaming frame processing
+   - Implement batch processing
+   - Add memory usage monitoring
+
+7. Feedback Enhancement
+   - Add quantitative measurements
+   - Include specific angle comparisons
+   - Generate frame-specific drills
+   - Add video overlay annotations
+"""
+
 def detect_objects_with_background_subtraction(frames):
     """
     Detect moving objects using background subtraction and contour analysis
@@ -939,7 +1035,15 @@ def analyze_swing_mechanics(frames):
     return trajectories
 
 def detect_swing_phase(frames):
-    """Detect swing phases using advanced motion analysis and object tracking"""
+    """Detect swing phases using advanced motion analysis.
+    
+    TODO: Enhance Phase Detection
+    - Add ML-based phase classification
+    - Implement temporal clustering
+    - Add motion peak analysis
+    - Improve fallback mechanism
+    - Add confidence scores
+    """
     if len(frames) < 5:
         return list(range(min(5, len(frames))))
     
@@ -1256,45 +1360,13 @@ def detect_bat_region(frame):
 
 # Temporarily disabled batter isolation functionality
 def isolate_batter(frame):
+    """Isolate the batter in the frame using background subtraction and segmentation.
+    
+    TODO: Major Enhancement Needed
+    - Current: Function disabled, returns original frame
+    - Replace with deep learning segmentation (Mask R-CNN/DeepLab)
+    - Add person detection with YOLOv5/v8
+    - Implement fallback with traditional CV methods
+    - Consider transfer learning on baseball dataset
+    """
     return frame
-    """Isolate the batter in the frame using background subtraction and segmentation"""
-    # Convert to grayscale for processing
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    
-    # Apply GaussianBlur to reduce noise
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    
-    # Use adaptive thresholding to handle different lighting conditions
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                 cv2.THRESH_BINARY_INV, 11, 2)
-    
-    # Find contours to identify the batter's silhouette
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Create a mask for the batter
-    mask = np.zeros_like(gray)
-    
-    if contours:
-        # Find the largest contour (likely the batter)
-        largest_contour = max(contours, key=cv2.contourArea)
-        
-        # Filter by minimum area to avoid small noise
-        if cv2.contourArea(largest_contour) > 1000:  # Adjust threshold as needed
-            # Create a convex hull to get a cleaner silhouette
-            hull = cv2.convexHull(largest_contour)
-            
-            # Draw the hull on the mask
-            cv2.drawContours(mask, [hull], -1, (255), -1)
-            
-            # Apply morphological operations to clean up the mask
-            kernel = np.ones((5,5), np.uint8)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    
-    # Convert mask to 3 channels for color images
-    mask_3channel = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-    
-    # Apply the mask to the original frame
-    isolated_frame = cv2.bitwise_and(frame, mask_3channel)
-    
-    return isolated_frame, mask
