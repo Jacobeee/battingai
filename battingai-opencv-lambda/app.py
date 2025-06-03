@@ -723,6 +723,31 @@ def save_frames_to_s3(frames, analysis_id):
 
     print(f"Saving {len(frames)} frames to S3 for analysis {analysis_id}")
     
+    # If no frames, return empty lists
+    if not frames:
+        print(f"No frames to save for analysis {analysis_id}")
+        # Create minimal metadata
+        metadata = {
+            "analysis_id": analysis_id,
+            "frame_count": 0,
+            "created_at": int(time.time()),
+            "frames": []
+        }
+        
+        # Save the metadata even if there are no frames
+        try:
+            s3_client.put_object(
+                Bucket=bucket_name,
+                Key=f"analyses/{analysis_id}/frames_metadata.json",
+                Body=json.dumps(metadata),
+                ContentType='application/json'
+            )
+            print(f"Saved empty frame metadata for {analysis_id}")
+        except Exception as e:
+            print(f"Error saving frame metadata: {str(e)}")
+            
+        return frame_paths, frame_urls
+    
     # Create metadata structure for optimized storage
     metadata = {
         "analysis_id": analysis_id,
@@ -934,8 +959,8 @@ def compare_frames(user_frames, reference_frames):
     - Generate specific improvement suggestions
     - Add visual alignment overlays
     """
-    if not reference_frames:
-        print("No reference frames available for comparison")
+    if not user_frames or not reference_frames:
+        print("No frames available for comparison")
         return None
     
     # Ensure we have the same number of frames to compare
@@ -1853,24 +1878,22 @@ def lambda_handler(event, context):
         
         # Get the video key from the request
         video_key = body.get('video_key')
-        if not video_key:
-            return {
-                'statusCode': 400,
-                'headers': headers,
-                'body': json.dumps({
-                    'error': f"Missing required parameter: video_key"
-                })
-            }
+        has_video = video_key is not None
         
-        print(f"Using video key: {video_key} for analysis: {analysis_id}")
+        if not has_video:
+            print(f"Warning: No video_key provided for analysis: {analysis_id}. Will proceed with limited functionality.")
+        else:
+            print(f"Using video key: {video_key} for analysis: {analysis_id}")
         
         # Create initial metadata to indicate processing
         metadata = {
             "analysis_id": analysis_id,
-            "video_key": video_key,
             "status": "processing",
             "player_id": player_id
         }
+        
+        if has_video:
+            metadata["video_key"] = video_key
         
         s3_client.put_object(
             Bucket=bucket_name,
@@ -1879,23 +1902,32 @@ def lambda_handler(event, context):
             ContentType='application/json'
         )
         
-        # Download video from S3
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
-            temp_path = temp_video.name
-            
-            try:
-                s3_client.download_file(bucket_name, video_key, temp_path)
-                print(f"Successfully downloaded video to {temp_path}")
+        # Initialize frames
+        frames = []
+        
+        # Process video if available
+        if has_video:
+            # Download video from S3
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
+                temp_path = temp_video.name
                 
-                # Extract frames
-                frames = extract_frames(temp_path)
-            finally:
-                # Clean up the temp file
                 try:
-                    os.unlink(temp_path)
-                    print(f"Cleaned up temporary file: {temp_path}")
-                except Exception as e:
-                    print(f"Error cleaning up temp file: {str(e)}")
+                    s3_client.download_file(bucket_name, video_key, temp_path)
+                    print(f"Successfully downloaded video to {temp_path}")
+                    
+                    # Extract frames
+                    frames = extract_frames(temp_path)
+                finally:
+                    # Clean up the temp file
+                    try:
+                        os.unlink(temp_path)
+                        print(f"Cleaned up temporary file: {temp_path}")
+                    except Exception as e:
+                        print(f"Error cleaning up temp file: {str(e)}")
+        else:
+            print(f"No video to process for analysis: {analysis_id}")
+            # Create placeholder frames or use default frames
+            # For now, we'll just use an empty list
         
         # Save frames to S3
         frame_paths, frame_urls = save_frames_to_s3(frames, analysis_id)
@@ -1937,14 +1969,17 @@ def lambda_handler(event, context):
         # Update metadata
         metadata = {
             "analysis_id": analysis_id,
-            "video_key": video_key,
             "status": "feedback_generated",
             "player_id": player_id,
             "frame_paths": frame_paths,
             "frame_urls": frame_urls,
             "reference_urls": reference_urls,
-            "results": feedback
+            "results": feedback,
+            "has_video": has_video
         }
+        
+        if has_video:
+            metadata["video_key"] = video_key
         
         s3_client.put_object(
             Bucket=bucket_name,
@@ -1960,7 +1995,8 @@ def lambda_handler(event, context):
             'headers': headers,
             'body': json.dumps({
                 'analysis_id': analysis_id,
-                'status': 'feedback_generated'
+                'status': 'feedback_generated',
+                'has_video': has_video
             })
         }
         
@@ -1969,14 +2005,20 @@ def lambda_handler(event, context):
         print(traceback.format_exc())
         
         # Update metadata with error status
-        if analysis_id and video_key:
+        if analysis_id:
             try:
                 error_metadata = {
                     "analysis_id": analysis_id,
-                    "video_key": video_key,
                     "status": "error",
-                    "error": str(e)
+                    "error": str(e),
+                    "has_video": has_video if 'has_video' in locals() else False
                 }
+                
+                if 'video_key' in locals() and video_key:
+                    error_metadata["video_key"] = video_key
+                
+                if 'player_id' in locals() and player_id:
+                    error_metadata["player_id"] = player_id
                 
                 s3_client.put_object(
                     Bucket=bucket_name,
