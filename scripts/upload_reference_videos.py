@@ -6,6 +6,20 @@ import cv2
 import numpy as np
 import tempfile
 import json
+import sys
+import traceback
+import time
+
+# Add the parent directory to the Python path to import from app.py
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'battingai-opencv-lambda'))
+
+# Import functions from app.py
+try:
+    from app import extract_frames, save_frames_to_s3, detect_swing_phase
+except ImportError as e:
+    print(f"Error importing functions from app.py: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
 def detect_objects_with_background_subtraction(frames):
     """
@@ -338,54 +352,63 @@ def extract_frames(video_path, num_frames=5):
     return final_frames
 
 def upload_reference_video(s3_client, bucket_name, video_path, player_id, player_name):
-    """Upload a reference video and its frames to S3"""
+    """Upload a reference video and its frames to S3 using the same processing as user videos"""
     # Upload the video
     video_key = f"reference/{player_id}.mp4"
     print(f"Uploading {video_path} to s3://{bucket_name}/{video_key}")
     s3_client.upload_file(video_path, bucket_name, video_key)
     
-    # Extract frames
-    print(f"Extracting frames from {video_path}")
-    frames = extract_frames(video_path)
+    # Create a reference ID similar to analysis_id for user videos
+    reference_id = f"{player_id}_{int(time.time())}"
     
-    # Upload frames
-    frame_paths = []
-    for i, frame in enumerate(frames):
-        # Convert frame to jpg
-        _, buffer = cv2.imencode('.jpg', frame)
+    # Extract frames using the same function as user videos
+    print(f"Extracting frames from {video_path} using app.py extract_frames function")
+    try:
+        # Download video to a temporary file if it's an S3 URL
+        if video_path.startswith('s3://'):
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
+                temp_path = temp_video.name
+                s3_path = video_path[5:].split('/', 1)
+                s3_bucket = s3_path[0]
+                s3_key = s3_path[1]
+                s3_client.download_file(s3_bucket, s3_key, temp_path)
+                frames = extract_frames(temp_path)
+                os.unlink(temp_path)
+        else:
+            frames = extract_frames(video_path)
         
-        # Upload to S3
-        frame_key = f"reference/{player_id}/frames/frame_{i}.jpg"
-        print(f"Uploading frame {i} to s3://{bucket_name}/{frame_key}")
+        print(f"Successfully extracted {len(frames)} frames")
+        
+        # Save frames to S3 using the same function as user videos
+        frame_paths, frame_urls = save_frames_to_s3(frames, f"reference/{player_id}")
+        
+        # Create metadata similar to user video metadata
+        metadata = {
+            'player_id': player_id,
+            'player_name': player_name,
+            'video_key': video_key,
+            'frame_paths': frame_paths,
+            'frame_urls': frame_urls,
+            'frame_count': len(frames),
+            'created_at': int(time.time())
+        }
+        
+        # Upload metadata
+        metadata_key = f"reference/{player_id}/metadata.json"
+        print(f"Uploading metadata to s3://{bucket_name}/{metadata_key}")
         s3_client.put_object(
             Bucket=bucket_name,
-            Key=frame_key,
-            Body=buffer.tobytes(),
-            ContentType='image/jpeg'
+            Key=metadata_key,
+            Body=json.dumps(metadata),
+            ContentType='application/json'
         )
         
-        frame_paths.append(frame_key)
-    
-    # Create metadata
-    metadata = {
-        'player_id': player_id,
-        'player_name': player_name,
-        'video_key': video_key,
-        'frame_paths': frame_paths,
-        'frame_count': len(frames)
-    }
-    
-    # Upload metadata
-    metadata_key = f"reference/{player_id}/metadata.json"
-    print(f"Uploading metadata to s3://{bucket_name}/{metadata_key}")
-    s3_client.put_object(
-        Bucket=bucket_name,
-        Key=metadata_key,
-        Body=json.dumps(metadata),
-        ContentType='application/json'
-    )
-    
-    print(f"Successfully uploaded reference video for {player_name}")
+        print(f"Successfully uploaded reference video for {player_name}")
+        return True
+    except Exception as e:
+        print(f"Error processing reference video: {str(e)}")
+        traceback.print_exc()
+        return False
 
 def main():
     parser = argparse.ArgumentParser(description='Upload reference MLB player videos to S3')
@@ -403,7 +426,14 @@ def main():
     s3_client = session.client('s3')
     
     # Upload reference video
-    upload_reference_video(s3_client, args.bucket, args.video, args.player_id, args.player_name)
+    success = upload_reference_video(s3_client, args.bucket, args.video, args.player_id, args.player_name)
+    
+    if not success:
+        print(f"Failed to upload reference video for {args.player_name}")
+        sys.exit(1)
+    else:
+        print(f"Successfully processed reference video for {args.player_name}")
+        sys.exit(0)
 
 if __name__ == '__main__':
     main()

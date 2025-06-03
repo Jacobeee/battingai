@@ -832,25 +832,51 @@ def get_reference_frames(player_id, num_frames=5):
     reference_urls = []
 
     try:
-        # List reference frames for the player
-        response = s3_client.list_objects_v2(
-            Bucket=bucket_name,
-            Prefix=f"reference/{player_id}/frames/"
-        )
+        # First try to get frames from metadata
+        try:
+            metadata_key = f"reference/{player_id}/metadata.json"
+            response = s3_client.get_object(Bucket=bucket_name, Key=metadata_key)
+            metadata = json.loads(response['Body'].read().decode('utf-8'))
+            
+            if 'frame_paths' in metadata:
+                print(f"Found metadata with {len(metadata['frame_paths'])} frame paths for player {player_id}")
+                frame_keys = metadata['frame_paths']
+                
+                # If we have frame_urls in metadata, use them
+                if 'frame_urls' in metadata and len(metadata['frame_urls']) == len(frame_keys):
+                    reference_urls = metadata['frame_urls']
+            else:
+                print(f"Metadata found but no frame_paths for player {player_id}")
+                frame_keys = []
+        except Exception as e:
+            print(f"Error loading metadata, falling back to listing objects: {str(e)}")
+            # List reference frames for the player
+            response = s3_client.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=f"reference/{player_id}/frames/"
+            )
+            
+            if 'Contents' in response:
+                # Sort by key to ensure frames are in order
+                frame_keys = sorted([obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.jpg') and 'full' in obj['Key']])
+                
+                if not frame_keys:
+                    # Fall back to old format if no 'full' variant frames found
+                    frame_keys = sorted([obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.jpg')])
+            else:
+                print(f"No reference frames found for player {player_id}")
+                frame_keys = []
         
-        if 'Contents' in response:
-            # Sort by key to ensure frames are in order
-            frame_keys = sorted([obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.jpg')])
-            
-            # Select evenly spaced frames if there are more than we need
-            if len(frame_keys) > num_frames:
-                step = len(frame_keys) // num_frames
-                frame_keys = [frame_keys[i] for i in range(0, len(frame_keys), step)][:num_frames]
-            
-            print(f"Found {len(frame_keys)} reference frames for player {player_id}")
-            
-            # Download each frame
-            for key in frame_keys:
+        # Select evenly spaced frames if there are more than we need
+        if len(frame_keys) > num_frames:
+            step = len(frame_keys) // num_frames
+            frame_keys = [frame_keys[i] for i in range(0, len(frame_keys), step)][:num_frames]
+        
+        print(f"Found {len(frame_keys)} reference frames for player {player_id}")
+        
+        # Download each frame
+        for key in frame_keys:
+            try:
                 response = s3_client.get_object(Bucket=bucket_name, Key=key)
                 image_data = response['Body'].read()
                 
@@ -862,14 +888,19 @@ def get_reference_frames(player_id, num_frames=5):
                     # Resize for consistency
                     img = cv2.resize(img, (640, 360))
                     reference_frames.append(img)
-                    url = get_presigned_url(key)
-                    if  url:
-                        reference_urls.append(url)
+                    
+                    # Generate URL if we don't already have it
+                    if len(reference_urls) < len(reference_frames):
+                        url = get_presigned_url(key)
+                        if url:
+                            reference_urls.append(url)
+                    
                     print(f"Loaded reference frame: {key}")
                 else:
                     print(f"Failed to decode reference frame: {key}")
-        else:
-            print(f"No reference frames found for player {player_id}")
+            except Exception as frame_e:
+                print(f"Error loading frame {key}: {str(frame_e)}")
+                continue
     except Exception as e:
         print(f"Error loading reference frames: {str(e)}")
         print(traceback.format_exc())
