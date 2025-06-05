@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import base64  # Add base64 for encoding binary data
 import time    # Add time for timestamps
+import google.generativeai as genai
+import base64
 
 s3_client = boto3.client('s3')
 bucket_name = os.environ.get('BUCKET_NAME', 'battingai-videobucket-ayk9m1uehbg2')
@@ -371,100 +373,603 @@ def is_contact_frame(frame, prev_frame=None):
     
     return False, 0.0
 
-def detect_swing_phase(frames):
-    """Detect the swing phases in the frames using bat-ball contact detection"""
-    if len(frames) < 5:
-        indices = [0]
-        step = (len(frames) - 1) / 4
-        for i in range(1, 4):
-            indices.append(min(len(frames) - 1, int(i * step)))
-        indices.append(len(frames) - 1)
-        return indices
+def detect_swing_phase(frames, pose_results=None):
+    """Detect swing phases using combined optical flow, motion analysis and pose detection.
     
-    # Calculate motion and contact scores for each frame
-    contact_scores = []
-    motion_scores = []
+    Args:
+        frames: List of video frames to analyze
+        pose_results: Optional pre-computed pose data. If None, will compute it using detect_poses_with_gemini
+    """
+    if len(frames) < 5:
+        return list(range(min(5, len(frames))))
+    
+    print("Analyzing swing mechanics with enhanced detection...")
+    
+    total_frames = len(frames)
+    frame_motions = []
     prev_frame = None
     
-    print("Analyzing frames for contact and motion...")
+    # Use provided pose data or get it if not provided
+    if pose_results is None:
+        pose_results = detect_poses_with_gemini(frames)
+    has_pose_data = pose_results is not None and len(pose_results) > 0
+    
+    # Use pose data to identify key swing phases
+    if has_pose_data:
+        key_frames = []
+        for i, pose_data in enumerate(pose_results):
+            if pose_data is None:
+                continue
+                
+            # Extract key points
+            keypoints = pose_data.get('keypoints', {})
+            bat_data = pose_data.get('bat', {})
+            
+            # Calculate phase indicators
+            if i == 0:
+                # Setup phase - first frame
+                key_frames.append(i)
+            else:
+                prev_pose = pose_results[i-1]
+                if prev_pose:
+                    # Check if required keypoints exist before calculating movement
+                    required_keypoints = ['left_hip', 'right_hip']
+                    has_required_keypoints = all(k in keypoints for k in required_keypoints) and all(k in prev_pose['keypoints'] for k in required_keypoints)
+                    
+                    hip_movement = 0
+                    if has_required_keypoints:
+                        # Load phase - check for significant hip rotation and weight shift
+                        prev_hips = (prev_pose['keypoints']['left_hip'], prev_pose['keypoints']['right_hip'])
+                        curr_hips = (keypoints['left_hip'], keypoints['right_hip'])
+                        hip_movement = calculate_point_movement(prev_hips, curr_hips)
+                    
+                    # Swing phase - check for bat movement and arm extension
+                    prev_bat = prev_pose.get('bat', {}).get('grip_position', {})
+                    curr_bat = bat_data.get('grip_position', {})
+                    bat_movement = calculate_point_movement([prev_bat], [curr_bat])
+                    
+                    # Add key frame if significant movement detected or if this is a key position
+                    if hip_movement > 0.1 or bat_movement > 0.15 or i == len(pose_results)//2 or i == len(pose_results)-1:
+                        key_frames.append(i)
+        
+        # Ensure we have enough key frames
+        if len(key_frames) < 5:
+            # Add intermediate frames to get to 5 key phases
+            needed_frames = 5 - len(key_frames)
+            frame_indices = np.linspace(0, total_frames - 1, needed_frames + 2)[1:-1]
+            key_frames.extend([int(i) for i in frame_indices if int(i) not in key_frames])
+            key_frames.sort()
+        
+        # Take the first 5 key frames
+        return key_frames[:5]
+    
+    # Calculate optical flow for motion detection
     for i, frame in enumerate(frames):
-        # Check for contact
-        is_contact, contact_score = is_contact_frame(frame, prev_frame)
-        contact_scores.append((i, contact_score))
-        
-        # Calculate motion
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if prev_frame is not None:
-            gray1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-            gray2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            diff = cv2.absdiff(gray1, gray2)
-            motion = np.mean(diff)
-            motion_scores.append((i, motion))
+            flow = cv2.calcOpticalFlowFarneback(prev_frame, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+            motion_magnitude = np.mean(mag)
+            
+            # If we have pose data, combine it with motion score
+            if has_pose_data and i < len(pose_results):
+                pose_data = pose_results[i]
+                if pose_data and 'keypoints' in pose_data:
+                    # Calculate pose movement score
+                    pose_motion = calculate_pose_motion(pose_data)
+                    # Combine scores (70% pose, 30% optical flow)
+                    motion_magnitude = 0.7 * pose_motion + 0.3 * motion_magnitude
+            
+            frame_motions.append((i, motion_magnitude))
+        prev_frame = gray
+    
+    if not frame_motions:
+        # Fallback to evenly spaced frames
+        step = total_frames // 4
+        return [0, step, 2*step, 3*step, total_frames-1]
+    
+    # Enhanced contact detection using combined data
+    contact_idx = identify_contact_frame(frames, frame_motions, pose_results if has_pose_data else None)
+    
+    # Calculate minimum spacing
+    min_spacing = max(3, total_frames // 20)
+    
+    # Enhanced setup frame detection
+    setup_idx = identify_setup_frame(frame_motions, contact_idx, pose_results if has_pose_data else None)
+    
+    # Enhanced load frame detection
+    load_idx = identify_load_frame(frame_motions, setup_idx, contact_idx, pose_results if has_pose_data else None)
+    
+    # Swing frame - just before contact with validation
+    swing_idx = identify_swing_frame(frame_motions, load_idx, contact_idx, pose_results if has_pose_data else None)
+    
+    # Enhanced follow-through detection
+    followthrough_idx = identify_followthrough_frame(frame_motions, contact_idx, total_frames, pose_results if has_pose_data else None)
+    
+    # Ensure indices are properly ordered and within bounds
+    indices = [
+        min(setup_idx, total_frames - 4),
+        min(load_idx, total_frames - 3),
+        min(swing_idx, total_frames - 2),
+        min(contact_idx, total_frames - 1),
+        min(followthrough_idx, total_frames - 1)
+    ]
+    
+    # Validate and adjust frame spacing
+    indices = validate_frame_spacing(indices, min_spacing, total_frames)
+    
+    print(f"Selected frames at: {indices}")
+    return indices
+
+def calculate_pose_motion(pose_data):
+    """Calculate motion score from pose data"""
+    if not pose_data or 'keypoints' not in pose_data:
+        return 0.0
         
-        prev_frame = frame.copy()
+    # Calculate movement based on key joint positions
+    joints = pose_data['keypoints']
     
-    if not motion_scores:
-        return [0, len(frames)//4, len(frames)//2, 3*len(frames)//4, len(frames)-1]
+    # Focus on arms, shoulders, and torso movement
+    key_joints = ['left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist']
     
-    # Find contact frame (highest combined score of contact and motion)
-    combined_scores = []
-    for i in range(len(motion_scores)):
-        _, motion = motion_scores[i]
-        _, contact = contact_scores[i+1]  # offset by 1 due to motion calculation
-        # Normalize scores
-        motion_norm = motion / max(m for _, m in motion_scores)
-        # Combine scores with higher weight on contact detection
-        combined_scores.append((i+1, 0.7 * contact + 0.3 * motion_norm))
+    motion_score = 0.0
+    count = 0
     
-    # Find the frame with highest combined score - this is our contact frame
-    contact_idx = max(combined_scores, key=lambda x: x[1])[0]
+    for joint in key_joints:
+        if joint in joints:
+            # Get joint velocity
+            if 'velocity' in joints[joint]:
+                motion_score += np.linalg.norm(joints[joint]['velocity'])
+                count += 1
     
-    print(f"Detected contact at frame {contact_idx}")
+    return motion_score / count if count > 0 else 0.0
+
+def identify_contact_frame(frames, frame_motions, pose_results):
+    """Identify contact frame using multiple signals with enhanced accuracy"""
+    scores = []
+    best_score = 0
+    best_idx = None
     
-    # Now find other phases relative to contact
-    total_frames = len(frames)
-    
-    # Setup - stable frame in first third before contact
-    early_frames = list(range(max(0, contact_idx - total_frames//3), contact_idx))
-    if early_frames:
-        setup_idx = min(early_frames, key=lambda i: motion_scores[i][1])
+    # First pass: Find frames with significant motion and potential contact
+    for i, (idx, motion) in enumerate(frame_motions):
+        if idx < len(frames) - 1:  # Ensure we can look ahead
+            # Calculate base score from motion
+            base_score = motion
+            
+            # Check bat-ball proximity with higher precision
+            is_contact, contact_score = is_contact_frame(frames[idx], frames[idx-1] if idx > 0 else None)
+            
+            # Enhanced scoring based on multiple factors
+            score = base_score
+            if is_contact:
+                score *= (2.0 + contact_score)  # Increase weight of contact detection
+                
+                # Validate with pose data if available
+                if pose_results and idx < len(pose_results):
+                    pose_data = pose_results[idx]
+                    if pose_data and 'keypoints' in pose_data:
+                        # Check for proper batting form at contact                if is_contact_pose(pose_data):
+                            score *= 1.5  # Boost score for correct pose
+                            
+                            # Additional validation: Check for hip rotation
+                            if all(k in pose_data['keypoints'] for k in ['left_hip', 'right_hip']):
+                                hip_diff = abs(pose_data['keypoints']['left_hip']['x'] - 
+                                            pose_data['keypoints']['right_hip']['x'])
+                                if hip_diff > 0.2:  # Significant hip rotation
+                                    score *= 1.2
+                
+                # Look for sudden changes in the next frame
+                next_idx = idx + 1
+                if next_idx < len(frames):
+                    next_ball = detect_baseball(frames[next_idx])
+                    if next_ball is not None:
+                        curr_ball = detect_baseball(frames[idx])
+                        if curr_ball is not None:
+                            # Calculate ball movement
+                            movement = np.sqrt(
+                                (next_ball[0] - curr_ball[0])**2 +
+                                (next_ball[1] - curr_ball[1])**2
+                            )
+                            if movement > 20:  # Significant ball movement after contact
+                                score *= 1.3
+            
+            # Update best score
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+                
+    # Return best frame or fallback to highest motion
+    if best_idx is not None:
+        return best_idx
     else:
-        setup_idx = 0
+        # Fallback to frame with maximum motion in the latter half of swing
+        latter_half = [(i, m) for i, m in frame_motions if i > len(frame_motions)//2]
+        if latter_half:
+            return max(latter_half, key=lambda x: x[1])[0]
+        return frame_motions[-1][0]  # Last frame as final fallback
+        
+        scores.append((idx, score))
     
-    # Load - when motion starts increasing after setup
-    load_window = list(range(setup_idx + 1, max(setup_idx + 2, contact_idx - 10)))
-    if load_window:
-        # Look for first significant motion increase
-        motion_changes = [
-            (i, motion_scores[i][1] - motion_scores[i-1][1])
-            for i in load_window[1:]
+    return max(scores, key=lambda x: x[1])[0]
+
+def identify_setup_frame(frame_motions, contact_idx, pose_results):
+    """Identify setup frame using motion and pose data"""
+    setup_candidates = [(i, m) for i, m in frame_motions[:contact_idx]]
+    
+    if pose_results:
+        # Filter candidates based on pose
+        valid_setups = []
+        for idx, motion in setup_candidates:
+            if idx < len(pose_results):
+                pose_data = pose_results[idx]
+                if is_setup_pose(pose_data):
+                    valid_setups.append((idx, motion))
+        
+        if valid_setups:
+            return min(valid_setups, key=lambda x: x[1])[0]
+    
+    return min(setup_candidates, key=lambda x: x[1])[0] if setup_candidates else 0
+
+def identify_load_frame(frame_motions, setup_idx, contact_idx, pose_results):
+    """Identify the load frame between setup and contact"""
+    # Consider frames between setup and contact
+    load_candidates = [(i, m) for i, m in frame_motions if setup_idx < i < contact_idx]
+    
+    if pose_results:
+        # Filter candidates based on pose data
+        valid_loads = []
+        for idx, motion in load_candidates:
+            if idx < len(pose_results) and pose_results[idx]:
+                pose_data = pose_results[idx]
+                if is_load_pose(pose_data):
+                    valid_loads.append((idx, motion))
+        
+        if valid_loads:
+            # Find the frame with maximum motion among valid poses
+            return max(valid_loads, key=lambda x: x[1])[0]
+    
+    # Fallback: take frame at 1/3 distance between setup and contact
+    return setup_idx + (contact_idx - setup_idx) // 3
+
+def identify_swing_frame(frame_motions, load_idx, contact_idx, pose_results):
+    """Identify the swing frame between load and contact"""
+    # Consider frames between load and contact
+    swing_candidates = [(i, m) for i, m in frame_motions if load_idx < i < contact_idx]
+    
+    if pose_results:
+        # Filter candidates based on pose data
+        valid_swings = []
+        for idx, motion in swing_candidates:
+            if idx < len(pose_results) and pose_results[idx]:
+                pose_data = pose_results[idx]
+                if is_swing_pose(pose_data):
+                    valid_swings.append((idx, motion))
+        
+        if valid_swings:
+            # Find frame with maximum motion among valid poses
+            return max(valid_swings, key=lambda x: x[1])[0]
+    
+    # Fallback: take frame at 2/3 distance between load and contact
+    return load_idx + 2 * (contact_idx - load_idx) // 3
+
+def identify_followthrough_frame(frame_motions, contact_idx, total_frames, pose_results):
+    """Identify the follow-through frame after contact"""
+    # Consider frames after contact
+    followthrough_candidates = [(i, m) for i, m in frame_motions if contact_idx < i < total_frames]
+    
+    if pose_results:
+        # Filter candidates based on pose data
+        valid_followthroughs = []
+        for idx, motion in followthrough_candidates:
+            if idx < len(pose_results) and pose_results[idx]:
+                pose_data = pose_results[idx]
+                if is_followthrough_pose(pose_data):
+                    valid_followthroughs.append((idx, motion))
+        
+        if valid_followthroughs:
+            # Find frame with extended arms and completed rotation
+            return max(valid_followthroughs, key=lambda x: x[1])[0]
+    
+    # Fallback: take frame a few frames after contact
+    followthrough_offset = min(15, (total_frames - contact_idx) // 2)
+    return min(total_frames - 1, contact_idx + followthrough_offset)
+
+def is_swing_pose(pose_data):
+    """Check if pose matches swing position (forward movement and rotation)"""
+    if not pose_data or 'keypoints' not in pose_data:
+        return False
+    
+    joints = pose_data['keypoints']
+    bat = pose_data.get('bat', {})
+    
+    # Check for bat movement and body rotation
+    if bat.get('grip_position') and 'left_shoulder' in joints and 'right_shoulder' in joints:
+        # Check if bat is moving forward and shoulders are rotating
+        shoulder_diff = abs(joints['left_shoulder']['x'] - joints['right_shoulder']['x'])
+        if shoulder_diff > 0.3 and bat['grip_position']['confidence'] > 0.7:
+            return True
+    
+    return False
+
+def is_followthrough_pose(pose_data):
+    """Check if pose matches follow-through position (extended arms and completed rotation)"""
+    if not pose_data or 'keypoints' not in pose_data:
+        return False
+    
+    joints = pose_data['keypoints']
+    
+    # Check for extended arms and completed rotation
+    if all(joint in joints for joint in ['left_shoulder', 'right_shoulder', 'left_wrist', 'right_wrist']):
+        # Calculate arm extension
+        left_extension = abs(joints['left_wrist']['x'] - joints['left_shoulder']['x'])
+        right_extension = abs(joints['right_wrist']['x'] - joints['right_shoulder']['x'])
+        
+        # Check for full extension and rotation
+        if left_extension > 0.3 and right_extension > 0.3:
+            return True
+    
+    return False
+
+def is_contact_pose(pose_data):
+    """Check if pose matches contact position with enhanced validation"""
+    if not pose_data or 'keypoints' not in pose_data:
+        return False
+    
+    joints = pose_data['keypoints']
+    bat = pose_data.get('bat', {})
+    
+    # Required joints for contact pose validation
+    required_joints = ['left_shoulder', 'right_shoulder', 'left_elbow', 
+                      'right_elbow', 'left_wrist', 'right_wrist',
+                      'left_hip', 'right_hip']
+    
+    # Ensure we have all required joints
+    if not all(joint in joints for joint in required_joints):
+        return False
+      # Enhanced contact pose validation
+    try:
+        # 1. Check arm extension
+        left_arm_extension = (
+            abs(joints['left_wrist']['x'] - joints['left_shoulder']['x']) +
+            abs(joints['left_wrist']['y'] - joints['left_shoulder']['y'])
+        )
+        right_arm_extension = (
+            abs(joints['right_wrist']['x'] - joints['right_shoulder']['x']) +
+            abs(joints['right_wrist']['y'] - joints['right_shoulder']['y'])
+        )
+        
+        # 2. Check shoulder rotation
+        shoulder_diff = abs(joints['left_shoulder']['x'] - joints['right_shoulder']['x'])
+        
+        # 3. Verify bat position if available
+        bat_valid = False
+        if bat.get('grip_position'):
+            bat_pos = bat['grip_position']
+            wrists_midpoint_x = (joints['left_wrist']['x'] + joints['right_wrist']['x']) / 2
+            wrists_midpoint_y = (joints['left_wrist']['y'] + joints['right_wrist']['y']) / 2
+            
+            # Bat should be in front of wrists at contact
+            bat_valid = (
+                bat_pos['x'] > wrists_midpoint_x and
+                abs(bat_pos['y'] - wrists_midpoint_y) < 0.2 and  # Bat roughly at same height as wrists
+                bat_pos['confidence'] > 0.7
+            )
+        
+        # Combine all factors
+        is_valid = (
+            left_arm_extension > 0.25 and        # Arms should be extended
+            right_arm_extension > 0.25 and
+            shoulder_diff > 0.15 and             # Shoulders should be rotated
+            (bat_valid if bat.get('grip_position') else True)  # Bat position check if available
+        )
+        
+        return is_valid
+    except Exception as e:
+        print(f"Error in contact pose validation: {str(e)}")
+        return False
+
+def validate_frame_spacing(indices, min_spacing, total_frames):
+    """Validate and adjust frame spacing to ensure proper sequence"""
+    # First pass: Ensure minimum spacing
+    for i in range(1, len(indices)):
+        if indices[i] <= indices[i-1] + min_spacing:
+            indices[i] = min(total_frames - 1, indices[i-1] + min_spacing)
+    
+    # Second pass: If frames are too clustered at the end, redistribute
+    if indices[-1] >= total_frames - min_spacing and indices[0] < indices[-1] - 4 * min_spacing:
+        total_range = indices[-1] - indices[0]
+        indices = [
+            indices[0],
+            indices[0] + total_range // 4,
+            indices[0] + (total_range // 4) * 2,
+            indices[0] + (total_range // 4) * 3,
+            indices[-1]
         ]
-        significant_increases = [
-            (i, change) for i, change in motion_changes
-            if change > np.mean([c for _, c in motion_changes]) + np.std([c for _, c in motion_changes])
-        ]
-        if significant_increases:
-            load_idx = significant_increases[0][0]
-        else:
-            load_idx = setup_idx + (contact_idx - setup_idx) // 3
-    else:
-        load_idx = setup_idx + 1
     
-    # Swing - frame just before contact showing the approach
-    swing_idx = max(load_idx + 1, contact_idx - 2)
-    
-    # Follow-through - first clear frame after contact
-    followthrough_idx = min(total_frames - 1, contact_idx + 2)
-    
-    # Combine phases and ensure proper ordering
-    phases = [setup_idx, load_idx, swing_idx, contact_idx, followthrough_idx]
-    
-    # Validate frame sequence
-    for i in range(1, len(phases)):
-        if phases[i] <= phases[i-1]:
-            phases[i] = min(total_frames - 1, phases[i-1] + 1)
-    
-    print(f"Detected swing phases at frames: {phases}")
-    return phases
+    return indices
+
+def wait_with_backoff(retry_delay_seconds, max_retries=3):
+    """Implement exponential backoff for rate limits"""
+    for attempt in range(max_retries):
+        delay = retry_delay_seconds * (2 ** attempt)
+        print(f"Rate limit hit. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}...")
+        time.sleep(delay)
+        
+def extract_retry_delay(error_message):
+    """Extract retry delay from error message"""
+    try:
+        if "retry_delay" in error_message:
+            # Find the retry delay value in the error message
+            start = error_message.find("seconds: ") + 9
+            end = error_message.find("}", start)
+            if start > 8 and end > start:
+                return int(error_message[start:end])
+    except:
+        pass
+    return 60  # Default retry delay
+
+def detect_poses_with_gemini(frames):
+    """Detect poses in frames using Google's Gemini Vision API with rate limit handling"""
+    try:
+        # Configure Gemini API        genai.configure(api_key=os.environ.get('GOOGLE_API_KEY'))
+        model = genai.GenerativeModel('gemini-2.0-flash')
+
+        pose_results = []
+        max_retries = 3
+        
+        for i, frame in enumerate(frames):
+            # Convert frame to base64
+            _, buffer = cv2.imencode('.jpg', frame)
+            image_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Create the prompt that asks for specific pose analysis
+            prompt = """You are a specialized computer vision model for baseball swing analysis. For this baseball swing image, carefully identify and output the EXACT x,y coordinates (normalized between 0.0-1.0) and confidence scores for ALL key body points and the bat.
+
+IMPORTANT: You MUST identify ALL body joints visible in the image, not just the head. Look carefully for shoulders, elbows, wrists, hips, knees, and feet. For any joint you cannot see clearly, make your best estimate of its position based on human anatomy and baseball stance.
+
+Return ONLY a valid JSON object with this exact structure - no other text, no markdown formatting:
+{"keypoints":{"head":{"x":0.5,"y":0.2,"confidence":0.9},"left_shoulder":{"x":0.4,"y":0.3,"confidence":0.9},"right_shoulder":{"x":0.6,"y":0.3,"confidence":0.9},"left_elbow":{"x":0.3,"y":0.4,"confidence":0.9},"right_elbow":{"x":0.7,"y":0.4,"confidence":0.9},"left_wrist":{"x":0.2,"y":0.5,"confidence":0.9},"right_wrist":{"x":0.8,"y":0.5,"confidence":0.9},"left_hip":{"x":0.45,"y":0.6,"confidence":0.9},"right_hip":{"x":0.55,"y":0.6,"confidence":0.9},"left_knee":{"x":0.4,"y":0.8,"confidence":0.9},"right_knee":{"x":0.6,"y":0.8,"confidence":0.9},"left_foot":{"x":0.4,"y":0.95,"confidence":0.9},"right_foot":{"x":0.6,"y":0.95,"confidence":0.9}},"bat":{"grip_position":{"x":0.7,"y":0.5,"confidence":0.9},"bat_angle":45,"confidence":0.9}}
+
+Replace these example values with the actual coordinates and confidence scores you detect in the image. For joints that are partially visible or occluded, provide your best estimate and set a lower confidence score (0.5-0.7)."""
+            
+            for attempt in range(max_retries):
+                try:            # Call Gemini API with image content
+                    response = model.generate_content([{
+                        "text": prompt
+                    }, {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_base64
+                        }
+                    }],
+                    generation_config={
+                        "temperature": 0.1,
+                        "candidate_count": 1,
+                        "stop_sequences": ["}"],
+                        "top_p": 0.8,
+                        "top_k": 40
+                    },
+                    stream=False,
+                    safety_settings=[
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+                    ])# Parse response
+                    response_text = response.text
+                    # Handle markdown code blocks in the response
+                    if "```json" in response_text:
+                        # Remove markdown code block formatting
+                        response_text = response_text.replace("```json", "").replace("```", "").strip()
+                    
+                    # More robust JSON extraction
+                    try:
+                        json_start = response_text.find('{')
+                        if json_start >= 0:
+                            # Complete the JSON if it appears to be truncated
+                            if '}' not in response_text[json_start:]:
+                                # Try to complete the JSON structure based on what we have
+                                json_content = response_text[json_start:]
+                                # Count opening braces to determine how many closing braces to add
+                                open_braces = json_content.count('{')
+                                close_braces = json_content.count('}')
+                                missing_braces = open_braces - close_braces
+                                if missing_braces > 0:
+                                    json_content += '}' * missing_braces
+                            else:
+                                # Find the matching closing brace by counting braces
+                                brace_count = 0
+                                json_end = -1
+                                for i in range(json_start, len(response_text)):
+                                    if response_text[i] == '{':
+                                        brace_count += 1
+                                    elif response_text[i] == '}':
+                                        brace_count -= 1
+                                        if brace_count == 0:
+                                            json_end = i + 1
+                                            break
+                                
+                                if json_end > json_start:
+                                    json_content = response_text[json_start:json_end]
+                                else:
+                                    raise ValueError("Could not find matching closing brace in JSON response")
+                            
+                            pose_data = json.loads(json_content)
+                        else:
+                            raise ValueError("Could not find opening brace in JSON response")
+                    except Exception as json_error:
+                        print(f"Error parsing JSON from response: {str(json_error)}")
+                        print(f"Response text: {response_text[:100]}...")  # Print first 100 chars for debugging
+                        raise ValueError(f"Failed to parse JSON: {str(json_error)}")
+                    
+                    # Validate the pose data structure
+                    if 'keypoints' in pose_data:
+                        required_fields = ['x', 'y', 'confidence']
+                        is_valid = all(
+                            all(field in joint for field in required_fields)
+                            for joint in pose_data['keypoints'].values()
+                        )
+                        
+                        # Check if we have at least the head keypoint
+                        if is_valid:
+                            # If we only have the head keypoint, add estimated positions for other keypoints
+                            if len(pose_data['keypoints']) == 1 and 'head' in pose_data['keypoints']:
+                                head = pose_data['keypoints']['head']
+                                head_x, head_y = head['x'], head['y']
+                                confidence = 0.7  # Lower confidence for estimated keypoints
+                                
+                                # Add estimated positions for other keypoints based on head position
+                                # These are rough anatomical estimates for a baseball batter
+                                pose_data['keypoints']['left_shoulder'] = {'x': head_x - 0.05, 'y': head_y + 0.1, 'confidence': confidence}
+                                pose_data['keypoints']['right_shoulder'] = {'x': head_x + 0.05, 'y': head_y + 0.1, 'confidence': confidence}
+                                pose_data['keypoints']['left_elbow'] = {'x': head_x - 0.1, 'y': head_y + 0.2, 'confidence': confidence}
+                                pose_data['keypoints']['right_elbow'] = {'x': head_x + 0.15, 'y': head_y + 0.2, 'confidence': confidence}
+                                pose_data['keypoints']['left_wrist'] = {'x': head_x - 0.15, 'y': head_y + 0.3, 'confidence': confidence}
+                                pose_data['keypoints']['right_wrist'] = {'x': head_x + 0.2, 'y': head_y + 0.3, 'confidence': confidence}
+                                pose_data['keypoints']['left_hip'] = {'x': head_x - 0.05, 'y': head_y + 0.4, 'confidence': confidence}
+                                pose_data['keypoints']['right_hip'] = {'x': head_x + 0.05, 'y': head_y + 0.4, 'confidence': confidence}
+                                pose_data['keypoints']['left_knee'] = {'x': head_x - 0.05, 'y': head_y + 0.6, 'confidence': confidence}
+                                pose_data['keypoints']['right_knee'] = {'x': head_x + 0.05, 'y': head_y + 0.6, 'confidence': confidence}
+                                pose_data['keypoints']['left_foot'] = {'x': head_x - 0.05, 'y': head_y + 0.8, 'confidence': confidence}
+                                pose_data['keypoints']['right_foot'] = {'x': head_x + 0.05, 'y': head_y + 0.8, 'confidence': confidence}
+                                
+                                # Add estimated bat position
+                                if 'bat' not in pose_data:
+                                    pose_data['bat'] = {
+                                        'grip_position': {'x': head_x + 0.2, 'y': head_y + 0.3, 'confidence': confidence},
+                                        'bat_angle': 45,
+                                        'confidence': confidence
+                                    }
+                            
+                            print(f"Frame {i}: Successfully detected {len(pose_data['keypoints'])} keypoints")
+                            pose_results.append(pose_data)
+                        else:
+                            print(f"Frame {i}: Invalid keypoint data structure")
+                            pose_results.append(None)
+                    else:
+                        print(f"Frame {i}: Missing keypoints in response")
+                        pose_results.append(None)
+                    # Successfully processed frame, break retry loop
+                    break
+                except Exception as e:
+                    error_message = str(e)
+                    if "429" in error_message:  # Rate limit error
+                        retry_delay = extract_retry_delay(error_message)
+                        if attempt < max_retries - 1:  # Don't wait on last attempt
+                            wait_with_backoff(retry_delay, max_retries - attempt)
+                            continue
+                    print(f"Error processing frame {i}: {error_message}")
+                    pose_results.append(None)
+                    break
+
+            # Add a small delay between frames to avoid rate limits
+            time.sleep(1)
+
+        return pose_results
+
+    except Exception as e:
+        print(f"Error in detect_poses_with_gemini: {str(e)}")
+        return None
 
 def extract_frames(video_path, num_frames=5, max_memory_mb=500):
     """Extract key frames from a video file.
@@ -1438,7 +1943,7 @@ def detect_objects_with_background_subtraction(frames):
                 aspect_ratio = float(w)/h
                 
                 # Classify objects based on size and shape
-                if 0.8 < aspect_ratio < 1.2 and area < 500:  # Ball-like object
+                if 0.8 < aspect_ratio < 1.2 and area < 500: # Ball-like object
                     ball_trajectory.append((x + w//2, y + h//2))
                 elif w > 50 and h < w:  # Bat-like object
                     bat_trajectory.append((x + w//2, y + h//2))
@@ -1522,297 +2027,6 @@ def analyze_swing_mechanics(frames):
     
     return trajectories
 
-
-def detect_swing_phase(frames):
-    """Detect swing phases using advanced motion analysis.
-    
-    Enhanced Phase Detection:
-    - ML-based phase classification
-    - Temporal clustering
-    - Motion peak analysis
-    - Improved fallback mechanism
-    - Confidence scores
-    """
-    if len(frames) < 5:
-        return list(range(min(5, len(frames))))
-    
-    print("Analyzing swing mechanics with enhanced detection...")
-    
-    # Get object trajectories
-    obj_trajectories, bat_trajectory, ball_trajectory = detect_objects_with_background_subtraction(frames)
-    
-    # Analyze swing mechanics using optical flow
-    motion_analysis = analyze_swing_mechanics(frames)
-    
-    # Initialize confidence scores for each phase
-    confidence_scores = {
-        'setup': 0.0,
-        'load': 0.0,
-        'swing': 0.0,
-        'contact': 0.0,
-        'followthrough': 0.0
-    }
-    
-    # Calculate total frames and minimum frame spacing
-    total_frames = len(frames)
-    min_spacing = max(3, total_frames // 15)  # Ensure at least 3 frames between phases
-    
-    # Implement temporal clustering of motion
-    frame_motions = []
-    if len(frames) > 1:
-        prev_frame = frames[0]
-        for i in range(1, len(frames)):
-            # Calculate motion between consecutive frames
-            prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-            curr_gray = cv2.cvtColor(frames[i], cv2.COLOR_BGR2GRAY)
-            flow = cv2.calcOpticalFlowFarneback(prev_gray, curr_gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-            
-            # Calculate magnitude of flow
-            mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-            motion_magnitude = np.mean(mag)
-            
-            frame_motions.append((i, motion_magnitude))
-            prev_frame = frames[i]
-    
-    # Perform motion peak analysis
-    motion_peaks = []
-    if frame_motions:
-        # Calculate moving average to smooth motion data
-        window_size = max(3, len(frame_motions) // 10)
-        motion_values = [m for _, m in frame_motions]
-        smoothed_motions = []
-        
-        for i in range(len(motion_values)):
-            start_idx = max(0, i - window_size // 2)
-            end_idx = min(len(motion_values), i + window_size // 2 + 1)
-            window = motion_values[start_idx:end_idx]
-            smoothed_motions.append(np.mean(window))
-        
-        # Find peaks in smoothed motion
-        for i in range(1, len(smoothed_motions) - 1):
-            if (smoothed_motions[i] > smoothed_motions[i-1] and 
-                smoothed_motions[i] > smoothed_motions[i+1] and
-                smoothed_motions[i] > np.mean(smoothed_motions) + 0.5 * np.std(smoothed_motions)):
-                motion_peaks.append((frame_motions[i][0], smoothed_motions[i]))
-        
-        # Sort peaks by magnitude
-        motion_peaks.sort(key=lambda x: x[1], reverse=True)
-    
-    # ML-based phase classification (simplified version using heuristics)
-    # In a real ML implementation, we would use a trained model here
-    
-    # First, try to identify contact frame using multiple signals
-    contact_candidates = []
-    
-    # 1. Use motion peaks as potential contact points
-    if motion_peaks:
-        for peak_idx, peak_val in motion_peaks[:min(3, len(motion_peaks))]:
-            contact_candidates.append({
-                'frame_idx': peak_idx,
-                'confidence': min(1.0, peak_val / max(p[1] for p in motion_peaks)),
-                'source': 'motion_peak'
-            })
-    
-    # 2. Use ball trajectory changes
-    if ball_trajectory and len(ball_trajectory) > 2:
-        ball_velocities = []
-        for i in range(1, len(ball_trajectory)):
-            dx = ball_trajectory[i][0] - ball_trajectory[i-1][0]
-            dy = ball_trajectory[i][1] - ball_trajectory[i-1][1]
-            velocity = np.sqrt(dx*dx + dy*dy)
-            ball_velocities.append((i, velocity))
-        
-        # Look for sudden changes in ball velocity
-        for i in range(1, len(ball_velocities)):
-            vel_change = abs(ball_velocities[i][1] - ball_velocities[i-1][1])
-            if vel_change > np.mean([v[1] for v in ball_velocities]):
-                confidence = min(1.0, vel_change / (2 * np.mean([v[1] for v in ball_velocities])))
-                contact_candidates.append({
-                    'frame_idx': ball_velocities[i][0],
-                    'confidence': confidence,
-                    'source': 'ball_velocity'
-                })
-    
-    # 3. Use bat-ball proximity
-    for i in range(len(frames)):
-        is_contact, contact_score = is_contact_frame(frames[i], frames[i-1] if i > 0 else None)
-        if contact_score > 0.5:
-            contact_candidates.append({
-                'frame_idx': i,
-                'confidence': contact_score,
-                'source': 'bat_ball_proximity'
-            })
-    
-    # Select best contact frame from candidates
-    contact_idx = None
-    max_confidence = 0
-    
-    if contact_candidates:
-        # Group candidates that are close to each other (temporal clustering)
-        clusters = []
-        current_cluster = [contact_candidates[0]]
-        
-        for i in range(1, len(contact_candidates)):
-            if abs(contact_candidates[i]['frame_idx'] - contact_candidates[i-1]['frame_idx']) <= min_spacing:
-                current_cluster.append(contact_candidates[i])
-            else:
-                clusters.append(current_cluster)
-                current_cluster = [contact_candidates[i]]
-        
-        if current_cluster:
-            clusters.append(current_cluster)
-        
-        # Find best cluster based on combined confidence
-        best_cluster = None
-        best_cluster_score = 0
-        
-        for cluster in clusters:
-            # Calculate weighted average of confidences
-            cluster_score = sum(c['confidence'] for c in cluster) / len(cluster)
-            
-            # Boost score if cluster has multiple sources
-            sources = set(c['source'] for c in cluster)
-            if len(sources) > 1:
-                cluster_score *= (1.0 + 0.2 * (len(sources) - 1))
-            
-            if cluster_score > best_cluster_score:
-                best_cluster_score = cluster_score
-                best_cluster = cluster
-        
-        if best_cluster:
-            # Find frame with highest confidence in best cluster
-            best_candidate = max(best_cluster, key=lambda x: x['confidence'])
-            contact_idx = best_candidate['frame_idx']
-            max_confidence = best_candidate['confidence']
-            confidence_scores['contact'] = max_confidence
-    
-    # Fallback if no good contact frame found
-    if contact_idx is None or max_confidence < 0.3:
-        print("Low confidence in contact detection, using motion-based fallback")
-        # Use frame with highest motion as contact
-        if frame_motions:
-            contact_idx = max(frame_motions, key=lambda x: x[1])[0]
-            confidence_scores['contact'] = 0.5  # Medium confidence for fallback
-        else:
-            contact_idx = total_frames // 2
-            confidence_scores['contact'] = 0.3  # Low confidence for default
-    
-    # Calculate other phase frames relative to contact
-    # Setup phase: look for low motion before significant increase
-    setup_candidates = []
-    
-    if frame_motions:
-        # Find the point where motion starts increasing significantly before contact
-        motion_threshold = np.mean([m for _, m in frame_motions]) * 0.7
-        for i in range(contact_idx - 1, 0, -1):
-            if i < len(frame_motions) and frame_motions[i][1] < motion_threshold:
-                setup_candidates.append({
-                    'frame_idx': i,
-                    'confidence': 1.0 - (frame_motions[i][1] / motion_threshold),
-                    'source': 'motion_start'
-                })
-                if len(setup_candidates) >= 3:  # Limit search
-                    break
-    
-    # Select best setup frame
-    setup_idx = 0
-    if setup_candidates:
-        best_setup = max(setup_candidates, key=lambda x: x['confidence'])
-        setup_idx = best_setup['frame_idx']
-        confidence_scores['setup'] = best_setup['confidence']
-    else:
-        # Fallback: use first frame
-        confidence_scores['setup'] = 0.5
-    
-    # Load phase: look for increasing motion between setup and contact
-    load_candidates = []
-    
-    if frame_motions:
-        search_start = setup_idx + min_spacing
-        search_end = max(search_start + 1, contact_idx - min_spacing)
-        
-        for i in range(search_start, search_end):
-            if i < len(frame_motions):
-                # Higher confidence for frames with increasing motion
-                if i > 0 and i < len(frame_motions) and frame_motions[i][1] > frame_motions[i-1][1]:
-                    confidence = min(1.0, frame_motions[i][1] / np.mean([m for _, m in frame_motions]))
-                    load_candidates.append({
-                        'frame_idx': i,
-                        'confidence': confidence,
-                        'source': 'increasing_motion'
-                    })
-    
-    # Select best load frame
-    load_idx = max(setup_idx + min_spacing, contact_idx // 2)
-    if load_candidates:
-        best_load = max(load_candidates, key=lambda x: x['confidence'])
-        load_idx = best_load['frame_idx']
-        confidence_scores['load'] = best_load['confidence']
-    else:
-        # Fallback: use midpoint between setup and contact
-        load_idx = setup_idx + (contact_idx - setup_idx) // 2
-        confidence_scores['load'] = 0.5
-    
-    # Swing phase: frame just before contact
-    swing_idx = max(load_idx + min_spacing, contact_idx - min_spacing)
-    confidence_scores['swing'] = 0.8  # High confidence since it's relative to contact
-    
-    # Follow-through phase: look for decreasing motion after contact
-    followthrough_candidates = []
-    
-    if frame_motions:
-        search_start = contact_idx + min_spacing
-        search_end = min(total_frames, contact_idx + 4 * min_spacing)
-        
-        for i in range(search_start, search_end):
-            if i < len(frame_motions) and i > 0:
-                # Higher confidence for frames with decreasing motion
-                if frame_motions[i][1] < frame_motions[i-1][1]:
-                    confidence = min(1.0, 1.0 - (frame_motions[i][1] / np.mean([m for _, m in frame_motions])))
-                    followthrough_candidates.append({
-                        'frame_idx': i,
-                        'confidence': confidence,
-                        'source': 'decreasing_motion'
-                    })
-    
-    # Select best followthrough frame
-    followthrough_idx = min(total_frames - 1, contact_idx + 2 * min_spacing)
-    if followthrough_candidates:
-        best_followthrough = max(followthrough_candidates, key=lambda x: x['confidence'])
-        followthrough_idx = best_followthrough['frame_idx']
-        confidence_scores['followthrough'] = best_followthrough['confidence']
-    else:
-        # Fallback: use frame after contact
-        confidence_scores['followthrough'] = 0.6
-    
-    # Ensure proper spacing between phases
-    phases = [setup_idx, load_idx, swing_idx, contact_idx, followthrough_idx]
-    
-    # Validate and adjust spacing
-    for i in range(1, len(phases)):
-        if phases[i] <= phases[i-1]:
-            # Try to push the current phase forward
-            phases[i] = min(total_frames - 1, phases[i-1] + min_spacing)
-    
-    # If phases are too clustered at the end, redistribute them
-    if phases[-1] >= total_frames - min_spacing and phases[0] < phases[-1] - 4 * min_spacing:
-        frame_step = (phases[-1] - phases[0]) // 4
-        phases = [
-            phases[0],
-            phases[0] + frame_step,
-            phases[0] + 2 * frame_step,
-            phases[0] + 3 * frame_step,
-            phases[-1]
-        ]
-        # Adjust confidence scores for redistributed phases
-        for phase in confidence_scores:
-            if phase != 'setup' and phase != 'followthrough':
-                confidence_scores[phase] = 0.4  # Lower confidence for redistributed phases
-    
-    print(f"Selected frames at: {phases} with confidence scores: {confidence_scores}")
-    return phases
-
-
 def lambda_handler(event, context):
     """Process video to extract frames for analysis"""
     headers = {
@@ -1879,6 +2093,7 @@ def lambda_handler(event, context):
             ContentType='application/json'
         )
         
+               
         # Download video from S3
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
             temp_path = temp_video.name
@@ -2175,3 +2390,17 @@ def isolate_batter(frame):
     result = cv2.add(isolated_batter, masked_background)
     
     return result
+
+def calculate_point_movement(prev_points, curr_points):
+    """Calculate the average movement between two sets of points with normalized coordinates"""
+    movements = []
+    for p1, p2 in zip(prev_points, curr_points):
+        if p1.get('x') is not None and p1.get('y') is not None and \
+           p2.get('x') is not None and p2.get('y') is not None:
+            # Calculate Euclidean distance with normalized coordinates
+            dx = p2['x'] - p1['x']
+            dy = p2['y'] - p1['y']
+            movement = np.sqrt(dx*dx + dy*dy)
+            movements.append(movement)
+    
+    return np.mean(movements) if movements else 0.0
